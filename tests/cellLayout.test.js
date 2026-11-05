@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { NUCLEUS_RADIUS, blocksNucleusView } from '../src/scenes/cell/cellLayout.js';
-import { createTaperedTube } from '../src/scenes/cell/cellGeometry.js';
+import { createTaperedTube } from '../src/scenes/shared/geometry.js';
 
 describe('blocksNucleusView', () => {
   const camera = [new THREE.Vector3(0, 0, 12)];

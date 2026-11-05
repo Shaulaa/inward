@@ -6,6 +6,7 @@ import { createLanes, distributeAlongLane } from './redCellLanes.js';
 import { createParticles } from '../shared/particles.js';
 import { ENDOTHELIUM, ENDOTHELIUM_HIGHLIGHT } from '../shared/palette.js';
 import noise from '../../shaders/noise.glsl?raw';
+import bump from '../../shaders/bump.glsl?raw';
 import wallVertex from './wall.vert.glsl?raw';
 import wallFragment from './wall.frag.glsl?raw';
 import redCellVertex from './redCell.vert.glsl?raw';
@@ -31,7 +32,13 @@ const FOG_DENSITY = 0.072;
  */
 const PATH_SEGMENTS = 14;
 const PATH_SPACING = 12;
-const CAMERA_START = 0.03;
+/**
+ * World units the camera rides along the vessel before the overlap, and the
+ * timeline units the dive toward the wall takes. Both are absolute so the ride
+ * keeps its speed when the scene's duration changes.
+ */
+const RIDE_LENGTH = 62;
+const DIVE_UNITS = 0.25;
 /** Arc-length position of the endothelial cell the camera dives into. */
 const TARGET_S = 0.6;
 /** World units: the camera stops this far before the target along the vessel, and looks this far ahead. */
@@ -132,7 +139,7 @@ export class VesselScene extends BaseScene {
         },
       ]),
       vertexShader: `${noise}\n${wallVertex}`,
-      fragmentShader: `${noise}\n${wallFragment}`,
+      fragmentShader: `${noise}\n${bump}\n${wallFragment}`,
       side: THREE.BackSide,
       fog: true,
     });
@@ -212,7 +219,7 @@ export class VesselScene extends BaseScene {
     this.scene.add(this.plasma);
   }
 
-  update({ progress, exit, time }) {
+  update({ progress, exit, duration, time }) {
     // Flow uses its own clock so a scene that was just built doesn't jump.
     const dt = this.lastTime === null ? 0 : Math.min(time - this.lastTime, 0.1);
     this.lastTime = time;
@@ -225,7 +232,7 @@ export class VesselScene extends BaseScene {
     this.plasma.material.uniforms.uTime.value = time;
 
     this.#updateFlow(flow, time);
-    this.#updateCamera(progress, exit);
+    this.#updateCamera(progress, exit, duration);
   }
 
   #updateFlow(flow, time) {
@@ -262,15 +269,16 @@ export class VesselScene extends BaseScene {
    * the frame. Phase 2 (press): creep into the membrane during the overlap
    * while the next scene opens through it.
    */
-  #updateCamera(progress, exit) {
+  #updateCamera(progress, exit, duration) {
     const { center, ahead, position, look } = this.tmp;
     const overlapStart = 1 - exit;
-    const diveStart = Math.max(0.1, overlapStart - 0.25);
+    const diveStart = Math.max(0.1, overlapStart - DIVE_UNITS / duration);
     const dive = easeInOutCubic(range01(diveStart, overlapStart, progress));
     const press = easeOutCubic(range01(overlapStart, 1, progress));
 
     const stopS = TARGET_S - CAMERA_STOP_BEFORE_TARGET / this.path.length;
-    const s = lerp(CAMERA_START, stopS, Math.min(progress / overlapStart, 1));
+    const startS = Math.max(0.02, stopS - RIDE_LENGTH / this.path.length);
+    const s = lerp(startS, stopS, Math.min(progress / overlapStart, 1));
     this.path.pointAt(s, center);
     this.path.pointAt(Math.min(s + LOOK_AHEAD / this.path.length, 1), ahead);
 

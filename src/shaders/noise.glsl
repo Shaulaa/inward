@@ -90,7 +90,9 @@ vec4 voronoi2(vec2 p, float periodY) {
     for (int i = -1; i <= 1; i++) {
       vec2 g = vec2(float(i), float(j));
       vec2 cell = n + g;
-      if (periodY > 0.0) cell.y = mod(cell.y, periodY);
+      // max() keeps the divisor non-zero even in the (unused) periodY = 0 branch;
+      // otherwise constant folding of mod(x, 0.0) warns on some compilers.
+      if (periodY > 0.0) cell.y = mod(cell.y, max(periodY, 1.0));
       vec2 o = hash22(cell);
       vec2 r = g + o - f;
       float d = dot(r, r);

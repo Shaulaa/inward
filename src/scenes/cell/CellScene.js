@@ -3,16 +3,18 @@ import { BaseScene } from '../BaseScene.js';
 import { createParticles } from '../shared/particles.js';
 import { ENDOTHELIUM } from '../shared/palette.js';
 import { CELL_RADIUS, NUCLEUS_RADIUS, blocksNucleusView, createCellRoute, distanceToRoute } from './cellLayout.js';
-import { createCisternaGeometry, createTaperedTube } from './cellGeometry.js';
-import noise from '../../shaders/noise.glsl?raw';
-import organelleVertex from './organelle.vert.glsl?raw';
-import organelleFragment from './organelle.frag.glsl?raw';
+import { createCisternaGeometry } from './cellGeometry.js';
+import { createTaperedTube } from '../shared/geometry.js';
+import { organicMaterial } from '../shared/materials.js';
+import organelleVertex from '../../shaders/organelle.vert.glsl?raw';
+import organelleFragment from '../../shaders/organelle.frag.glsl?raw';
 import mitochondriaFragment from './mitochondria.frag.glsl?raw';
 import nucleusFragment from './nucleus.frag.glsl?raw';
 import membraneVertex from './membrane.vert.glsl?raw';
 import membraneFragment from './membrane.frag.glsl?raw';
 import { createRng } from '../../utils/random.js';
 import { clamp, easeInOutSine, lerp, smoothstep } from '../../utils/math.js';
+import { crossAtMidEntry, exitPhases, settle } from '../../utils/choreography.js';
 
 // Exponential-squared fog gives depth: far organelles sink into the cytoplasm
 // haze. Right after the membrane the haze is still the dark red of the vessel
@@ -31,37 +33,28 @@ const ER_FADE_LENGTH = 1.3;
 /** Final part of the route eases to a stop instead of halting abruptly when the scroll ends. */
 const SETTLE_START = 0.8;
 
+/**
+ * Timeline units spent diving from the framed shot into the nuclear envelope
+ * before the transition into the nucleus begins (absolute, so the dive keeps
+ * its pace whatever the scene's duration).
+ */
+const NUCLEUS_DIVE_UNITS = 0.21;
+/** Lens distance from the envelope when the dive hands over to the slow press, and at the very end. */
+const ENVELOPE_APPROACH_GAP = 0.7;
+const ENVELOPE_END_GAP = 0.22;
+
 const ORIGIN = new THREE.Vector3();
-
-/** ShaderMaterial with three's fog uniforms and the shared noise library. */
-function organicMaterial({ vertexShader, fragmentShader, uniforms, ...options }) {
-  return new THREE.ShaderMaterial({
-    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 } }, uniforms]),
-    vertexShader: `${noise}\n${vertexShader}`,
-    fragmentShader: `${noise}\n${fragmentShader}`,
-    fog: true,
-    ...options,
-  });
-}
-
-/** Cubic with slope 1 at t=0 and slope 0 at t=1: continues the motion, then settles. */
-function settle(p, start) {
-  if (p <= start) return p;
-  const t = (p - start) / (1 - start);
-  return start + (1 - start) * (-t * t * t + t * t + t);
-}
 
 export class CellScene extends BaseScene {
   constructor(context) {
     super(context);
-    this.exitRimColor.set('#a8f0ff');
+    // Lavender rim: the next scene starts behind the nuclear envelope.
+    this.exitRimColor.set('#c9b8ff');
   }
 
   onBuild() {
     const q = this.quality.cell;
     const rng = createRng(21);
-    this.timed = [];
-
     this.fogColorCell = new THREE.Color(FOG_COLOR_CELL);
     this.fogColorEntry = new THREE.Color(FOG_COLOR_ENTRY);
     this.scene.fog = new THREE.FogExp2(FOG_COLOR_ENTRY, FOG_DENSITY_ENTRY);
@@ -98,13 +91,8 @@ export class CellScene extends BaseScene {
     };
   }
 
-  #track(material) {
-    this.timed.push(material);
-    return material;
-  }
-
   #buildMembrane(detail) {
-    const material = this.#track(
+    const material = this.animate(
       organicMaterial({
         vertexShader: membraneVertex,
         fragmentShader: membraneFragment,
@@ -128,7 +116,7 @@ export class CellScene extends BaseScene {
   }
 
   #buildNucleus() {
-    const material = this.#track(
+    const material = this.animate(
       organicMaterial({
         vertexShader: organelleVertex,
         fragmentShader: nucleusFragment,
@@ -149,7 +137,7 @@ export class CellScene extends BaseScene {
   }
 
   #buildMitochondria(rng, count) {
-    const material = this.#track(
+    const material = this.animate(
       organicMaterial({
         vertexShader: organelleVertex,
         fragmentShader: mitochondriaFragment,
@@ -204,7 +192,7 @@ export class CellScene extends BaseScene {
    * silhouette.
    */
   #buildEndoplasmicReticulum(rng, count) {
-    const material = this.#track(
+    const material = this.animate(
       organicMaterial({
         vertexShader: organelleVertex,
         fragmentShader: organelleFragment,
@@ -324,7 +312,7 @@ export class CellScene extends BaseScene {
    * to the nucleus, and never in front of it.
    */
   #buildGolgi(rng) {
-    const material = this.#track(
+    const material = this.animate(
       organicMaterial({
         vertexShader: organelleVertex,
         fragmentShader: organelleFragment,
@@ -477,14 +465,14 @@ export class CellScene extends BaseScene {
       // the dark red entry haze turns them into red dots.
       fogFade: true,
     });
-    this.timed.push(this.cytosol.material);
+    this.animate(this.cytosol.material);
     this.scene.add(this.cytosol);
   }
 
-  update({ progress, enter, time }) {
-    for (const material of this.timed) material.uniforms.uTime.value = time;
+  update({ progress, enter, exit, duration, time }) {
+    this.tick(time);
     this.#updateAtmosphere(progress, enter);
-    this.#updateCamera(progress, enter);
+    this.#updateCamera(progress, enter, exit, duration);
   }
 
   /** The vessel's dark red haze lingers just inside the membrane, then clears into the cell's colour. */
@@ -496,17 +484,24 @@ export class CellScene extends BaseScene {
   }
 
   /**
-   * Arc-length fraction = settle(progress)^k, with k chosen so the camera
-   * crosses the membrane exactly halfway through the incoming transition. The
-   * gaze leans toward the nucleus once inside and is centred on it at the end.
+   * Route: arc-length fraction = settle(p)^k (see crossAtMidEntry), so the
+   * camera crosses the membrane halfway through the incoming transition and
+   * eases to a stop on the framed shot of the nucleus. The gaze leans toward
+   * the nucleus once inside and is centred on it at the end of the route.
+   *
+   * Exit: from the framed shot the camera dives straight at the nucleus until
+   * the envelope fills the frame, then presses into it while the nucleus
+   * scene opens through the envelope.
    */
-  #updateCamera(progress, enter) {
+  #updateCamera(progress, enter, exit, duration) {
     const { curve, membraneFraction } = this.route;
     const { position, ahead, gaze, toNucleus } = this.tmp;
+    const { diveStart, dive, press } = exitPhases(progress, exit, NUCLEUS_DIVE_UNITS / duration);
 
-    const crossing = clamp(enter * 0.5, 0.02, 0.5);
-    const exponent = Math.log(membraneFraction) / Math.log(crossing);
-    const f = Math.pow(settle(clamp(progress), SETTLE_START), exponent);
+    // Route progress runs 0..1 between the scene start and the start of the dive.
+    const routeEnd = exit > 0 ? diveStart : 1;
+    const routeP = clamp(progress / routeEnd);
+    const f = crossAtMidEntry(settle(routeP, SETTLE_START), enter / routeEnd, membraneFraction);
 
     curve.getPointAt(f, position);
     curve.getPointAt(Math.min(f + 0.03, 1), ahead);
@@ -514,16 +509,25 @@ export class CellScene extends BaseScene {
     gaze.subVectors(ahead, position).normalize();
     toNucleus.subVectors(ORIGIN, position).normalize();
     const lean = smoothstep(enter, enter + 0.15, progress) * 0.25;
-    const frame = smoothstep(0.55, 0.95, progress);
+    const frame = smoothstep(0.55, 0.95, routeP);
     gaze.lerp(toNucleus, Math.max(lean, frame));
     if (gaze.lengthSq() < 1e-8) gaze.copy(toNucleus);
+
+    if (dive > 0) {
+      // Straight in along the line to the nucleus centre, so nothing new enters the shot.
+      const outward = ahead.copy(position).normalize();
+      const approach = NUCLEUS_RADIUS + ENVELOPE_APPROACH_GAP;
+      const end = NUCLEUS_RADIUS + ENVELOPE_END_GAP;
+      const distance = lerp(lerp(position.length(), approach, dive), end, press);
+      position.copy(outward).multiplyScalar(distance);
+      gaze.copy(outward).negate();
+    }
 
     this.camera.position.copy(position);
     this.camera.lookAt(position.add(gaze.normalize()));
   }
 
   onDispose() {
-    this.timed = [];
     this.route = null;
     this.isClear = null;
   }

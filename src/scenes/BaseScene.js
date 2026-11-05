@@ -16,6 +16,19 @@ export class BaseScene {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.01, 200);
     this.built = false;
+    /** Materials whose `uTime` uniform follows the clock (see animate / tick). */
+    this.timed = [];
+  }
+
+  /** Register a material whose `uTime` uniform should follow the clock. */
+  animate(material) {
+    this.timed.push(material);
+    return material;
+  }
+
+  /** Advance `uTime` on every registered material. */
+  tick(time) {
+    for (const material of this.timed) material.uniforms.uTime.value = time;
   }
 
   build() {
@@ -29,9 +42,11 @@ export class BaseScene {
 
   /**
    * Override: advance the scene.
-   * @param {{ progress: number, enter: number, exit: number, time: number, dt: number }} frame
+   * @param {{ progress: number, enter: number, exit: number, duration: number, time: number, dt: number }} frame
    *   progress: 0..1 across the scene's whole span, including overlaps.
    *   enter / exit: fractions of that span shared with the previous / next scene.
+   *   duration: the span's length in timeline units, for choreography that should
+   *   last a fixed amount of scrolling regardless of the scene's total length.
    */
   update(frame) {} // eslint-disable-line no-unused-vars
 
@@ -61,6 +76,7 @@ export class BaseScene {
       object.dispose?.(); // InstancedMesh / lights
     });
     this.scene.clear();
+    this.timed = [];
     this.onDispose();
     this.built = false;
   }

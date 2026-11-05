@@ -5,6 +5,17 @@ import { buildTimeline, liveWindow, sampleTimeline } from './timeline.js';
 /** Seconds a scene stays built after leaving the live window, so scrolling back and forth at a boundary doesn't rebuild it every frame. */
 const DISPOSE_DELAY = 1.5;
 
+/** Run `fn` when the main thread is idle (with a deadline), falling back to a short timeout. */
+function scheduleIdle(fn) {
+  if (typeof requestIdleCallback === 'function') return { id: requestIdleCallback(fn, { timeout: 600 }), idle: true };
+  return { id: setTimeout(fn, 32), idle: false };
+}
+
+function cancelIdle(handle) {
+  if (handle.idle) cancelIdleCallback(handle.id);
+  else clearTimeout(handle.id);
+}
+
 /**
  * Owns the scene lifecycle and the per-frame render:
  * - only the active scene and its neighbours hold GPU resources (others are disposed),
@@ -19,7 +30,9 @@ export class SceneManager {
     this.renderer = renderer;
     this.quality = quality;
     this.timeline = buildTimeline(journey.scenes, journey.transitions);
-    this.entries = journey.scenes.map((definition) => ({ definition, instance: null, outsideSince: null }));
+    this.entries = journey.scenes.map((definition) => ({ definition, instance: null, outsideSince: null, pending: null }));
+    /** Scene indices allowed to hold resources this frame. */
+    this.wanted = new Set();
     this.progress = 0;
     this.width = 1;
     this.height = 1;
@@ -78,13 +91,27 @@ export class SceneManager {
     // Visible scenes are always neighbours of the active one, but be explicit.
     keep.add(state.from);
     if (state.to !== null) keep.add(state.to);
+    this.wanted = keep;
 
     this.entries.forEach((entry, index) => {
       if (keep.has(index)) {
         entry.outsideSince = null;
-        if (!entry.instance) this.#create(entry, index === state.from || index === state.to);
+        if (entry.instance) return;
+        if (index === state.from || index === state.to) {
+          // Needed this frame: build now.
+          this.#cancelPending(entry);
+          this.#create(entry, true);
+        } else if (!entry.pending) {
+          // A neighbour: building takes up to a few hundred ms, so do it when
+          // the main thread is idle rather than in the middle of a scroll frame.
+          entry.pending = scheduleIdle(() => {
+            entry.pending = null;
+            if (!entry.instance && this.wanted.has(index)) this.#create(entry, false);
+          });
+        }
         return;
       }
+      this.#cancelPending(entry);
       if (!entry.instance) return;
       entry.outsideSince ??= time;
       if (time - entry.outsideSince >= DISPOSE_DELAY) {
@@ -93,6 +120,12 @@ export class SceneManager {
         entry.outsideSince = null;
       }
     });
+  }
+
+  #cancelPending(entry) {
+    if (!entry.pending) return;
+    cancelIdle(entry.pending);
+    entry.pending = null;
   }
 
   #create(entry, visibleNow) {
@@ -117,13 +150,14 @@ export class SceneManager {
   #drawScene(index, target, state, time, dt) {
     const instance = this.entries[index].instance;
     const span = this.timeline.spans[index];
-    instance.update({ progress: state.local[index], enter: span.enter, exit: span.exit, time, dt });
+    instance.update({ progress: state.local[index], enter: span.enter, exit: span.exit, duration: span.duration, time, dt });
     this.renderer.setRenderTarget(target);
     this.renderer.render(instance.scene, instance.camera);
   }
 
   dispose() {
     for (const entry of this.entries) {
+      this.#cancelPending(entry);
       entry.instance?.dispose();
       entry.instance = null;
     }

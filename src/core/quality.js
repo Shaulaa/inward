@@ -7,6 +7,19 @@ export function createQuality() {
   return {
     pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
     msaaSamples: 4,
+    skin: {
+      surfaceSize: 300,
+      denseSize: 48,
+      surfaceSegments: 440,
+      poreFieldSize: 90,
+      hairs: 260,
+    },
+    dermis: {
+      collagen: 300,
+      elastin: 200,
+      fibroblasts: 50,
+      fluidParticles: 1500,
+    },
     vessel: {
       redCells: 1500,
       plasmaParticles: 1800,
@@ -21,6 +34,15 @@ export function createQuality() {
       filaments: 320,
       erTubules: 26,
       membraneDetail: 64,
+    },
+    nucleus: {
+      fibers: 40,
+      particles: 2500,
+    },
+    dna: {
+      basePairs: 160,
+      backgroundHelices: 4,
+      particles: 1500,
     },
   };
 }

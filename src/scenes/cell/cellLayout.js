@@ -11,7 +11,7 @@ export const FINAL_DISTANCE = 14.5;
 const UP = new THREE.Vector3(0, 1, 0);
 
 /**
- * Camera route through the cell: in through the membrane, then a slow orbit
+ * Camera route through the cell: in through the membrane, then a short arc
  * past the organelles that turns to face the nucleus. Expressed in a local
  * frame (along = inward from the entry point, side, up) so the route can be
  * re-aimed by changing one direction.
@@ -25,11 +25,8 @@ export function createCellRoute() {
   const points = [
     at(CELL_RADIUS + ENTRY_OFFSET, 0, 0),
     at(CELL_RADIUS - 1.8, 0, 0),
-    at(16.0, 2.0, 0.8),
-    at(13.0, 6.0, -0.4),
-    at(10.0, 10.0, 0.8),
-    at(7.0, 12.5, 1.4),
-    at(4.0, 13.4, 1.8).setLength(FINAL_DISTANCE),
+    at(16.0, 4.0, 0.8),
+    at(10.5, 8.5, 1.4).setLength(FINAL_DISTANCE),
   ];
 
   const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
@@ -55,11 +52,7 @@ export function createCellRoute() {
 }
 
 /** Shortest distance from `point` to a polyline sampled from the route. */
-export function distanceToRoute(point, samples) {
-  let best = Infinity;
-  for (const s of samples) best = Math.min(best, s.distanceToSquared(point));
-  return Math.sqrt(best);
-}
+export { distanceToPoints as distanceToRoute } from '../shared/geometry.js';
 
 const toCenter = new THREE.Vector3();
 const toPoint = new THREE.Vector3();
