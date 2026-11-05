@@ -1,0 +1,159 @@
+:root {
+  --ink: #f4e9e6;
+  --ink-dim: rgba(244, 233, 230, 0.6);
+  --bg: #2a0407;
+  --font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Native scrollbar hidden; the page still scrolls (wheel, touch, keyboard). */
+html {
+  scrollbar-width: none;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Fixed + inset 0 sizes to the visual viewport exactly (no 100vw scrollbar overflow). */
+#webgl {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  outline: none;
+}
+
+/* Empty element that only provides scroll length; height is set from the timeline. */
+.track {
+  position: relative;
+  width: 1px;
+  pointer-events: none;
+}
+
+.brand {
+  position: fixed;
+  top: 24px;
+  left: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+  z-index: 2;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7), 0 0 14px rgba(0, 0, 0, 0.55);
+}
+
+/* Soft dark scrim behind the label so it stays legible over bright organelles. */
+.brand::before {
+  content: '';
+  position: absolute;
+  top: -24px;
+  left: -24px;
+  width: 480px;
+  height: 180px;
+  background: radial-gradient(
+    130% 110% at 0 0,
+    rgba(3, 8, 12, 0.78) 0%,
+    rgba(3, 8, 12, 0.55) 38%,
+    rgba(3, 8, 12, 0.18) 62%,
+    rgba(3, 8, 12, 0) 80%
+  );
+  z-index: -1;
+}
+
+.brand__name {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+}
+
+.brand__tag {
+  font-size: 12px;
+  /* Brighter than --ink-dim: it sits on a busy, moving background. */
+  color: rgba(244, 233, 230, 0.78);
+  letter-spacing: 0.04em;
+}
+
+.scroll-hint {
+  position: fixed;
+  left: 50%;
+  bottom: 32px;
+  margin: 0;
+  transform: translateX(-50%);
+  font-size: 12px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7), 0 0 12px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  z-index: 2;
+  transition: opacity 0.6s ease;
+}
+
+.scroll-hint.is-hidden {
+  opacity: 0;
+}
+
+.fallback {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 24px;
+  text-align: center;
+  font-size: 16px;
+  line-height: 1.5;
+  background: var(--bg);
+  z-index: 10;
+}
+
+.fallback[hidden] {
+  display: none;
+}
+
+.no-webgl .scroll-hint,
+.no-webgl .track {
+  display: none;
+}
+
+.debug-hud {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  margin: 0;
+  padding: 10px 12px;
+  font: 11px/1.5 var(--mono);
+  color: #d6fff4;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+@media (max-width: 600px) {
+  .brand {
+    top: 16px;
+    left: 16px;
+  }
+}
