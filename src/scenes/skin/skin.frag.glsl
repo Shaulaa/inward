@@ -26,21 +26,28 @@ void main() {
 
   // Microrelief: furrows outlining ~1 mm polygons, warped so they don't look gridded.
   vec2 warp = vec2(snoise(vec3(st * 0.35, 2.0)), snoise(vec3(st * 0.35, 7.0)));
-  vec4 plates = voronoi2(st * 0.95 + warp * 0.35, 0.0);
-  float plateEdge = plates.y - plates.x;
+  // Line widths use the pattern's pixel footprint and a rounded edge distance:
+  // fwidth() of a raw cellular edge jumps at the cell border and draws the
+  // border as a dotted line (see bump.glsl).
+  vec2 platesP = st * 0.95 + warp * 0.35;
+  vec4 plates = voronoi2(platesP, 0.0);
+  float plateEdge = softEdge(plates.y - plates.x, 0.05);
   // Shallow, soft-edged grooves (a hard dark line reads as cracked earth).
-  float furrow = 1.0 - smoothstep(0.0, 0.05 + fwidth(plateEdge) * 2.0, plateEdge);
+  float furrow = 1.0 - smoothstep(0.0, 0.05 + footprint(platesP) * 2.0, plateEdge);
   furrow *= 0.6;
   furrow *= 1.0 - smoothstep(12.0, 30.0, dist);
 
   // Corneocytes, only when close.
   float closeUp = 1.0 - smoothstep(0.4, 4.0, dist);
-  vec4 flakes = voronoi2(st * 28.0 + warp * 2.0, 0.0);
-  float flakeEdge = flakes.y - flakes.x;
-  float flakeLine = 1.0 - smoothstep(0.0, 0.1 + fwidth(flakeEdge) * 1.5, flakeEdge);
+  vec2 flakesP = st * 28.0 + warp * 2.0;
+  vec4 flakes = voronoi2(flakesP, 0.0);
+  float flakeEdge = softEdge(flakes.y - flakes.x, 0.08);
+  float flakeLine = 1.0 - smoothstep(0.0, 0.1 + footprint(flakesP) * 1.5, flakeEdge);
   float flakeTint = fract(sin(dot(flakes.zw, vec2(12.9898, 78.233))) * 43758.5453);
 
-  float height = -furrow * 0.6 + 0.25 * fbm3(vec3(st * 3.0, 0.0)) + closeUp * (0.15 * flakeTint - 0.25 * flakeLine);
+  // Relief only from continuous terms. The per-flake tint jumps at every
+  // border, so it tints the colour but stays out of the bump height.
+  float height = -furrow * 0.6 + 0.25 * fbm3(vec3(st * 3.0, 0.0)) - closeUp * 0.25 * flakeLine;
   vec3 Nb = perturbNormal(vWorldPos, N, height * 0.018, 1.0);
 
   vec3 base = mix(uColorBase, uColorBlush, smoothstep(-0.35, 0.6, fbm3(vec3(st * 0.22, 4.0))));

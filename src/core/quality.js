@@ -7,6 +7,8 @@ export function createQuality() {
   return {
     pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
     msaaSamples: 4,
+    /** Final-image treatment: bloom strength/threshold, vignette and grain amounts. */
+    post: { bloom: 0.35, threshold: 0.75, knee: 0.4, vignette: 0.28, grain: 0.018 },
     skin: {
       surfaceSize: 300,
       denseSize: 48,

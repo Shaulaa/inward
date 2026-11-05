@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BaseScene } from '../BaseScene.js';
 import { createParticles } from '../shared/particles.js';
-import { ENDOTHELIUM } from '../shared/palette.js';
+import { ENDOTHELIUM, NUCLEAR_ENVELOPE } from '../shared/palette.js';
 import { CELL_RADIUS, NUCLEUS_RADIUS, blocksNucleusView, createCellRoute, distanceToRoute } from './cellLayout.js';
 import { createCisternaGeometry } from './cellGeometry.js';
 import { createTaperedTube } from '../shared/geometry.js';
@@ -13,8 +13,8 @@ import nucleusFragment from './nucleus.frag.glsl?raw';
 import membraneVertex from './membrane.vert.glsl?raw';
 import membraneFragment from './membrane.frag.glsl?raw';
 import { createRng } from '../../utils/random.js';
-import { clamp, easeInOutSine, lerp, smoothstep } from '../../utils/math.js';
-import { crossAtMidEntry, exitPhases, settle } from '../../utils/choreography.js';
+import { clamp, easeInOutSine, lerp, range01, smoothstep } from '../../utils/math.js';
+import { closingGap, crossAtMidEntry, exitPhases, settle } from '../../utils/choreography.js';
 
 // Exponential-squared fog gives depth: far organelles sink into the cytoplasm
 // haze. Right after the membrane the haze is still the dark red of the vessel
@@ -39,9 +39,10 @@ const SETTLE_START = 0.8;
  * its pace whatever the scene's duration).
  */
 const NUCLEUS_DIVE_UNITS = 0.21;
-/** Lens distance from the envelope when the dive hands over to the slow press, and at the very end. */
-const ENVELOPE_APPROACH_GAP = 0.7;
+/** Lens distance from the envelope at the very end of the scene. */
 const ENVELOPE_END_GAP = 0.22;
+/** Size of the pore the camera dives into, relative to an ordinary pore. */
+const HERO_PORE_SIZE = 1.6;
 
 const ORIGIN = new THREE.Vector3();
 
@@ -103,7 +104,7 @@ export class CellScene extends BaseScene {
           uColorInner: { value: new THREE.Color('#5a3a7a') },
           uColorProtein: { value: new THREE.Color('#a84a55') },
           uColorProteinInner: { value: new THREE.Color('#5a6a9a') },
-          uColorRim: { value: new THREE.Color('#ff8fb0') },
+          uColorRim: { value: new THREE.Color('#c0708a') },
         },
         side: THREE.DoubleSide,
         transparent: true,
@@ -124,12 +125,15 @@ export class CellScene extends BaseScene {
           uWobble: { value: 0.12 },
           uWobbleScale: { value: 0.35 },
           uPoreScale: { value: 1.5 },
+          // The pore at the end of the route, straight ahead of the dive.
+          uHeroDir: { value: this.route.curve.getPointAt(1).normalize() },
+          uHeroSize: { value: HERO_PORE_SIZE },
           // The hero object only takes part of the haze so it stays the focal point.
           uFogAmount: { value: 0.3 },
-          uColorEnvelope: { value: new THREE.Color('#4a3fbf') },
-          uColorPoreRing: { value: new THREE.Color('#c2b4ff') },
-          uColorPoreCenter: { value: new THREE.Color('#120c3a') },
-          uColorRim: { value: new THREE.Color('#8f7bff') },
+          uColorEnvelope: { value: new THREE.Color(NUCLEAR_ENVELOPE.envelope) },
+          uColorPoreRing: { value: new THREE.Color(NUCLEAR_ENVELOPE.ring) },
+          uColorPoreCenter: { value: new THREE.Color(NUCLEAR_ENVELOPE.core) },
+          uColorRim: { value: new THREE.Color(NUCLEAR_ENVELOPE.rim) },
         },
       }),
     );
@@ -144,9 +148,9 @@ export class CellScene extends BaseScene {
         uniforms: {
           uWobble: { value: 0.07 },
           uWobbleScale: { value: 0.9 },
-          uColorMembrane: { value: new THREE.Color('#ff9a62') },
-          uColorMatrix: { value: new THREE.Color('#7a2638') },
-          uColorCristae: { value: new THREE.Color('#ffc48a') },
+          uColorMembrane: { value: new THREE.Color('#e8906a') },
+          uColorMatrix: { value: new THREE.Color('#9a3c40') },
+          uColorCristae: { value: new THREE.Color('#d98c66') },
         },
       }),
     );
@@ -181,6 +185,7 @@ export class CellScene extends BaseScene {
     mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingSphere();
     this.scene.add(mesh);
+    this.addAnchor('mitochondrion', placed, { near: 2.5, far: 16 });
   }
 
   /**
@@ -259,6 +264,8 @@ export class CellScene extends BaseScene {
       });
       this.scene.add(new THREE.Mesh(geometry, material));
     }
+    // Click point on the opaque middle of each tubule.
+    this.addAnchor('er', curves.map(({ curve }) => curve.getPointAt(0.5)), { near: 2, far: 18 });
     return curves;
   }
 
@@ -331,6 +338,8 @@ export class CellScene extends BaseScene {
     const stacks = candidates
       .filter((p) => distanceToRoute(p, this.route.samples) > 3.4 && this.isClear(p, 2.2))
       .slice(0, 2);
+
+    this.addAnchor('golgi', stacks, { near: 2.5, far: 18 });
 
     const layers = 6;
     const vesiclesPerStack = 12;
@@ -489,14 +498,15 @@ export class CellScene extends BaseScene {
    * eases to a stop on the framed shot of the nucleus. The gaze leans toward
    * the nucleus once inside and is centred on it at the end of the route.
    *
-   * Exit: from the framed shot the camera dives straight at the nucleus until
-   * the envelope fills the frame, then presses into it while the nucleus
-   * scene opens through the envelope.
+   * Exit: from the framed shot the camera closes in on the large pore
+   * straight ahead in one continuous move (closingGap): it never stalls,
+   * and is still drifting into the pore while the nucleus scene opens
+   * through it.
    */
   #updateCamera(progress, enter, exit, duration) {
     const { curve, membraneFraction } = this.route;
     const { position, ahead, gaze, toNucleus } = this.tmp;
-    const { diveStart, dive, press } = exitPhases(progress, exit, NUCLEUS_DIVE_UNITS / duration);
+    const { diveStart } = exitPhases(progress, exit, NUCLEUS_DIVE_UNITS / duration);
 
     // Route progress runs 0..1 between the scene start and the start of the dive.
     const routeEnd = exit > 0 ? diveStart : 1;
@@ -513,13 +523,13 @@ export class CellScene extends BaseScene {
     gaze.lerp(toNucleus, Math.max(lean, frame));
     if (gaze.lengthSq() < 1e-8) gaze.copy(toNucleus);
 
-    if (dive > 0) {
-      // Straight in along the line to the nucleus centre, so nothing new enters the shot.
+    if (exit > 0 && progress > diveStart) {
+      // Straight in along the line to the nucleus centre (and the hero pore),
+      // so nothing new enters the shot.
       const outward = ahead.copy(position).normalize();
-      const approach = NUCLEUS_RADIUS + ENVELOPE_APPROACH_GAP;
-      const end = NUCLEUS_RADIUS + ENVELOPE_END_GAP;
-      const distance = lerp(lerp(position.length(), approach, dive), end, press);
-      position.copy(outward).multiplyScalar(distance);
+      const startGap = position.length() - NUCLEUS_RADIUS;
+      const gap = closingGap(range01(diveStart, 1, progress), startGap, ENVELOPE_END_GAP);
+      position.copy(outward).multiplyScalar(NUCLEUS_RADIUS + gap);
       gaze.copy(outward).negate();
     }
 

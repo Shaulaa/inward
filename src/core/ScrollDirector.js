@@ -36,6 +36,15 @@ export class ScrollDirector {
     onProgress(this.trigger.progress);
   }
 
+  /**
+   * Jump straight back to the top. Used at the very end, where the closing
+   * rewind has already brought the view back to the opening shot, so the
+   * jump is invisible.
+   */
+  restart() {
+    this.lenis.scrollTo(0, { immediate: true, force: true });
+  }
+
   refresh() {
     ScrollTrigger.refresh();
   }

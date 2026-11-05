@@ -114,6 +114,512 @@ body::-webkit-scrollbar {
   opacity: 0;
 }
 
+/* Sound on/off. Opt-in: audio may only start after a user gesture. */
+.sound-toggle {
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px 7px 12px;
+  font: 500 11px/1 var(--font);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: rgba(8, 10, 14, 0.42);
+  border: 1px solid rgba(244, 233, 230, 0.22);
+  border-radius: 999px;
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.sound-toggle:hover {
+  background: rgba(8, 10, 14, 0.6);
+  border-color: rgba(244, 233, 230, 0.4);
+}
+
+.sound-toggle:focus-visible {
+  outline: 2px solid #f4e9e6;
+  outline-offset: 3px;
+}
+
+.sound-toggle[hidden] {
+  display: none;
+}
+
+.sound-toggle__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  transition: background 0.2s ease;
+}
+
+.sound-toggle[aria-pressed='true'] .sound-toggle__dot {
+  background: #ff8a80;
+  border-color: #ff8a80;
+  box-shadow: 0 0 8px rgba(255, 138, 128, 0.7);
+}
+
+.sound-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/*
+ * Scale indicator, bottom-left: the active scene and its scale over a ladder
+ * of all six scales. Kept small and in the corner, clear of the centre where
+ * the main object and the transition openings are.
+ */
+.scale {
+  position: fixed;
+  left: 24px;
+  bottom: 24px;
+  z-index: 2;
+  margin: 0;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7), 0 0 12px rgba(0, 0, 0, 0.5);
+}
+
+/* Same soft scrim as the brand label, anchored to the corner. */
+.scale::before {
+  content: '';
+  position: absolute;
+  left: -24px;
+  bottom: -24px;
+  width: 260px;
+  height: 230px;
+  background: radial-gradient(130% 110% at 0 100%, rgba(3, 8, 12, 0.66) 0%, rgba(3, 8, 12, 0.4) 40%, rgba(3, 8, 12, 0) 78%);
+  z-index: -1;
+}
+
+.scale__current {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 10px;
+}
+
+.scale__name {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(244, 233, 230, 0.78);
+}
+
+.scale__value {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.scale__ladder {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0 0 0 10px;
+  list-style: none;
+  border-left: 1px solid rgba(244, 233, 230, 0.25);
+}
+
+.scale__step {
+  position: relative;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  color: rgba(244, 233, 230, 0.38);
+  transition: color 0.4s ease;
+}
+
+.scale__step::before {
+  content: '';
+  position: absolute;
+  left: -13px;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin-top: -2.5px;
+  border-radius: 50%;
+  background: rgba(244, 233, 230, 0.3);
+  transition: background 0.4s ease, transform 0.4s ease;
+}
+
+.scale__step.is-past {
+  color: rgba(244, 233, 230, 0.55);
+}
+
+.scale__step.is-active {
+  color: var(--ink);
+}
+
+.scale__step.is-active::before {
+  background: #ff8a80;
+  transform: scale(1.4);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* "The visuals are an illustration": small, under the brand, inside its scrim. */
+.note {
+  position: fixed;
+  top: 72px;
+  left: 24px;
+  z-index: 2;
+  max-width: 250px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(244, 233, 230, 0.66);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
+
+/*
+ * Scene texts. Desktop: a glass panel in the left column, vertically centred
+ * (between the brand and the scale indicator, outside the centre of the
+ * frame). Phone: a band at the bottom, above the scale indicator.
+ * Opacity / visibility / transform are driven by the scroll (Captions.js);
+ * `translate` centres it without fighting that transform.
+ */
+.caption {
+  position: fixed;
+  left: 24px;
+  top: 50%;
+  translate: 0 -50%;
+  z-index: 2;
+  width: min(320px, calc(25vw - 40px));
+  margin: 0;
+  padding: 16px 18px 17px;
+  background: rgba(8, 10, 14, 0.46);
+  border: 1px solid rgba(244, 233, 230, 0.14);
+  border-radius: 14px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  will-change: opacity, transform;
+}
+
+.caption__kicker {
+  margin: 0 0 4px;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(244, 233, 230, 0.72);
+}
+
+.caption__title {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.25;
+}
+
+.caption__text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: rgba(244, 233, 230, 0.88);
+}
+
+/* The closing fact: one big number. */
+.caption--statement .caption__title {
+  margin-bottom: 8px;
+  font-size: 44px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+}
+
+.caption__action {
+  margin-top: 14px;
+  padding: 9px 16px;
+  font: 500 12px/1 var(--font);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: rgba(244, 233, 230, 0.1);
+  border: 1px solid rgba(244, 233, 230, 0.35);
+  border-radius: 999px;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.caption__action:hover {
+  background: rgba(244, 233, 230, 0.2);
+  border-color: rgba(244, 233, 230, 0.6);
+}
+
+.caption__action:focus-visible,
+.fact__close:focus-visible {
+  outline: 2px solid #f4e9e6;
+  outline-offset: 3px;
+}
+
+/* Click points: a 44 px hit area around a small dot, pinned to an object each frame. */
+.hotspots {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.hotspot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.35s ease, visibility 0s linear 0.35s;
+}
+
+.hotspot.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.35s ease;
+}
+
+.hotspot:focus {
+  outline: none;
+}
+
+.hotspot__dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.2), 0 0 12px rgba(0, 0, 0, 0.55);
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+/* A slow ring so the dots read as something to press. */
+.hotspot__dot::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  animation: hotspot-pulse 2.4s ease-out infinite;
+}
+
+@keyframes hotspot-pulse {
+  from {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(2.1);
+    opacity: 0;
+  }
+}
+
+.hotspot:hover .hotspot__dot,
+.hotspot:focus-visible .hotspot__dot {
+  transform: scale(1.2);
+}
+
+.hotspot:focus-visible .hotspot__dot {
+  box-shadow: 0 0 0 3px #0b0d12, 0 0 0 5px #f4e9e6;
+}
+
+.hotspot.is-active .hotspot__dot {
+  background: #ff8a80;
+}
+
+.hotspot__label {
+  position: absolute;
+  left: 40px;
+  top: 50%;
+  translate: 0 -50%;
+  padding: 5px 10px;
+  font: 500 12px/1.2 var(--font);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--ink);
+  background: rgba(8, 10, 14, 0.66);
+  border-radius: 999px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.hotspot.is-flipped .hotspot__label {
+  left: auto;
+  right: 40px;
+}
+
+.hotspot:hover .hotspot__label,
+.hotspot:focus-visible .hotspot__label,
+.hotspot.is-active .hotspot__label {
+  opacity: 1;
+}
+
+/*
+ * The fact card. Desktop: top-right corner under the sound button, outside
+ * the centre where the main object usually sits. Phone: bottom sheet.
+ */
+.fact {
+  position: fixed;
+  right: 24px;
+  top: 68px;
+  z-index: 4;
+  width: min(340px, calc(25vw - 40px));
+  padding: 16px 48px 18px 18px;
+  background: rgba(10, 12, 18, 0.8);
+  border: 1px solid rgba(244, 233, 230, 0.18);
+  border-radius: 16px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px);
+  transition: opacity 0.25s ease, transform 0.25s ease, visibility 0s linear 0.25s;
+}
+
+.fact.is-open {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.fact:focus {
+  outline: none;
+}
+
+.fact:focus-visible {
+  outline: 2px solid rgba(244, 233, 230, 0.55);
+  outline-offset: 2px;
+}
+
+.fact__kicker {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: rgba(244, 233, 230, 0.66);
+}
+
+.fact__scene {
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.fact__scale {
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.fact__title {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.fact__text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: rgba(244, 233, 230, 0.9);
+}
+
+.fact__close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  font: 400 22px/1 var(--font);
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.fact__close:hover {
+  background: rgba(244, 233, 230, 0.1);
+}
+
+/* Narrower than a desktop: texts move to a band at the bottom, the card becomes a bottom sheet. */
+@media (max-width: 999px) {
+  .caption {
+    left: 16px;
+    right: 16px;
+    top: auto;
+    bottom: 76px;
+    translate: none;
+    width: auto;
+    max-width: 560px;
+    padding: 12px 14px 13px;
+  }
+
+  .caption__title {
+    font-size: 15px;
+    margin-bottom: 4px;
+  }
+
+  .caption__text {
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .caption--statement .caption__title {
+    font-size: 32px;
+  }
+
+  /* The bottom sheet takes the text band's place while it is open. */
+  .has-fact .caption {
+    visibility: hidden !important;
+  }
+
+  .fact {
+    left: 16px;
+    right: 16px;
+    top: auto;
+    bottom: 16px;
+    width: auto;
+    max-width: 560px;
+  }
+}
+
 .fallback {
   position: fixed;
   inset: 0;
@@ -155,5 +661,51 @@ body::-webkit-scrollbar {
   .brand {
     top: 16px;
     left: 16px;
+  }
+
+  .sound-toggle {
+    top: 12px;
+    right: 16px;
+  }
+
+  .note {
+    top: 60px;
+    left: 16px;
+    max-width: min(250px, 62vw);
+  }
+
+  /* On small screens only the current scale; the ladder would crowd the frame. */
+  .scale {
+    left: 16px;
+    bottom: 16px;
+  }
+
+  .scale__ladder {
+    display: none;
+  }
+
+  .scale__current {
+    margin: 0;
+  }
+
+  .scale__value {
+    font-size: 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sound-toggle,
+  .sound-toggle__dot,
+  .scale__step,
+  .scale__step::before,
+  .hotspot,
+  .hotspot__dot,
+  .fact,
+  .caption__action {
+    transition: none;
+  }
+
+  .hotspot__dot::after {
+    animation: none;
   }
 }

@@ -10,14 +10,14 @@ export const glsl = { noise, nuclear, bump };
 
 /**
  * ShaderMaterial with three's fog uniforms, a `uTime` uniform and the shared
- * GLSL libraries (noise in both stages; nuclear-envelope and bump helpers in
+ * GLSL libraries (noise in both stages; bump and nuclear-envelope helpers in
  * the fragment stage).
  */
 export function organicMaterial({ vertexShader, fragmentShader, uniforms = {}, ...options }) {
   return new THREE.ShaderMaterial({
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 } }, uniforms]),
     vertexShader: `${noise}\n${vertexShader}`,
-    fragmentShader: `${noise}\n${nuclear}\n${bump}\n${fragmentShader}`,
+    fragmentShader: `${noise}\n${bump}\n${nuclear}\n${fragmentShader}`,
     fog: true,
     ...options,
   });

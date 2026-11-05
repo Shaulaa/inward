@@ -63,7 +63,8 @@ const ALONG_LANE_GAP = RED_CELL_RADIUS * 2 + 0.31;
 export class VesselScene extends BaseScene {
   constructor(context) {
     super(context);
-    this.exitRimColor.set('#ffb3a1');
+    // Deep, muted red: the rim sits between the maroon wall and the membrane.
+    this.exitRimColor.set('#a8524e');
   }
 
   onBuild() {
@@ -90,6 +91,8 @@ export class VesselScene extends BaseScene {
     this.#buildWall(curve, q);
     this.#buildRedCells(rng, q.redCells);
     this.#buildPlasma(rng, q.plasmaParticles);
+    this.cameraS = 0;
+    this.#buildAnchors();
 
     this.tmp = {
       position: new THREE.Vector3(),
@@ -135,7 +138,7 @@ export class VesselScene extends BaseScene {
           uColorBorder: { value: new THREE.Color(ENDOTHELIUM_HIGHLIGHT) },
           uColorNucleus: { value: new THREE.Color('#3e0a1e') },
           uColorRim: { value: new THREE.Color('#4a0a14') },
-          uColorTarget: { value: new THREE.Color('#ff8a70') },
+          uColorTarget: { value: new THREE.Color('#d98a7c') },
         },
       ]),
       vertexShader: `${noise}\n${wallVertex}`,
@@ -219,6 +222,26 @@ export class VesselScene extends BaseScene {
     this.scene.add(this.plasma);
   }
 
+  /**
+   * Click points ride along with the camera (the cells themselves stream past
+   * too fast to click): fixed slots a few units ahead of the lens — among the
+   * red cells, on the wall, and in the plasma between the lanes.
+   */
+  #buildAnchors() {
+    const slots = (distances, radial, count) =>
+      distances.flatMap((d) => Array.from({ length: count }, (_, k) => ({ d, radial, angle: (k / count) * Math.PI * 2 + d })));
+    const track = (spec) => {
+      const points = spec.map(() => new THREE.Vector3());
+      return () => {
+        spec.forEach((slot, i) => this.path.sample(Math.min(1, this.cameraS + slot.d / this.path.length), slot.radial, slot.angle, points[i]));
+        return points;
+      };
+    };
+    this.addAnchor('redCells', track(slots([4, 5.5], 1.5, 8)), { near: 1, far: 12 });
+    this.addAnchor('wall', track(slots([6, 8], VESSEL_RADIUS * 0.96, 8)), { near: 1, far: 14 });
+    this.addAnchor('plasma', track(slots([7.5, 9.5], 2.3, 8)), { near: 1, far: 14 });
+  }
+
   update({ progress, exit, duration, time }) {
     // Flow uses its own clock so a scene that was just built doesn't jump.
     const dt = this.lastTime === null ? 0 : Math.min(time - this.lastTime, 0.1);
@@ -279,6 +302,7 @@ export class VesselScene extends BaseScene {
     const stopS = TARGET_S - CAMERA_STOP_BEFORE_TARGET / this.path.length;
     const startS = Math.max(0.02, stopS - RIDE_LENGTH / this.path.length);
     const s = lerp(startS, stopS, Math.min(progress / overlapStart, 1));
+    this.cameraS = s;
     this.path.pointAt(s, center);
     this.path.pointAt(Math.min(s + LOOK_AHEAD / this.path.length, 1), ahead);
 

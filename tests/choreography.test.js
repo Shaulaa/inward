@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { crossAtMidEntry, exitPhases, settle } from '../src/utils/choreography.js';
+import { closingGap, crossAtMidEntry, exitPhases, settle } from '../src/utils/choreography.js';
 import { createSkinField } from '../src/scenes/skin/skinField.js';
 import { createRng } from '../src/utils/random.js';
 
@@ -31,6 +31,29 @@ describe('exitPhases', () => {
     const mid = exitPhases(0.7, exit, 0.2);
     expect(mid.dive).toBeGreaterThan(0);
     expect(mid.dive).toBeLessThan(1);
+  });
+});
+
+describe('closingGap', () => {
+  const gap = (t) => closingGap(t, 8, 0.22);
+
+  it('runs from the start gap to the end gap', () => {
+    expect(gap(0)).toBeCloseTo(8);
+    expect(gap(1)).toBeCloseTo(0.22);
+  });
+
+  it('starts at rest, never stalls, and keeps the on-screen growth rate steady', () => {
+    const steps = 1000;
+    const speeds = Array.from({ length: steps }, (_, i) => gap(i / steps) - gap((i + 1) / steps));
+    expect(speeds[0]).toBeLessThan(speeds[400] * 0.02);
+    // Relative closing rate (speed / gap: how fast the surface grows on
+    // screen) is constant once eased in — including at the very end, so the
+    // camera is still visibly moving when the scene hands over.
+    const rel = (i) => speeds[i] / gap(i / steps);
+    expect(rel(900) / rel(400)).toBeCloseTo(1, 1);
+    expect(rel(steps - 1) / rel(400)).toBeCloseTo(1, 1);
+    expect(speeds[steps - 1]).toBeGreaterThan(0);
+    speeds.forEach((v) => expect(v).toBeGreaterThanOrEqual(0));
   });
 });
 

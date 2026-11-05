@@ -118,11 +118,33 @@ function coil(backbone, peripheral) {
   return new THREE.CatmullRomCurve3(points);
 }
 
+/** The naked DNA past the beads, drawn as an actual double helix (dramatised ~3×, like the beads). */
+export const NAKED_HELIX_RADIUS = 0.022;
+export const NAKED_STRAND_RADIUS = 0.009;
+export const NAKED_PITCH = 0.1; // one turn
+export const NAKED_PAIRS_PER_TURN = 10.5;
+/** Angle between the two backbones of a pair (as in the DNA scene). */
+export const NAKED_GROOVE_ANGLE = (144 * Math.PI) / 180;
+
+const smooth01 = (x) => {
+  const t = Math.min(Math.max(x, 0), 1);
+  return t * t * (3 - 2 * t);
+};
+
 /**
- * The DNA path of a nucleosome string: straight linker DNA wrapping ~1.65
- * turns around each histone bead (spool axis along the string), with beads
- * only up to `beadsUntil` (distance from `start`); after that the DNA runs on
- * naked. Returns the DNA curve, the bead centres and the string direction.
+ * A nucleosome string: linker DNA wrapping ~1.65 turns around each histone
+ * bead (spool axis along the string), with beads only up to `beadsUntil`
+ * (distance from `start`). Past the beads the DNA runs on naked, its axis
+ * bending gently (more and more the further it gets), and is built as a
+ * real double helix — two backbones and base-pair rungs — so the strand the
+ * camera finally dives into already shows the structure the DNA scene opens on.
+ *
+ * Returns:
+ * - wrapped: the single-tube DNA around the beads (ends just past the last bead),
+ * - beads: bead centres, tangent: the string's overall direction,
+ * - axisAt(s, out): the DNA axis at distance s from `start` (bends past the beads),
+ * - naked: { start, strandA, strandB (curves), rungs: [{ a, b, middle, s }],
+ *   strandPoint(s, which, out), strandDirection(s, which, out) } for the double helix.
  */
 export function createNucleosomeString(start, end, center, beadsUntil = Infinity) {
   const tangent = end.clone().sub(start).normalize();
@@ -136,27 +158,85 @@ export function createNucleosomeString(start, end, center, beadsUntil = Infinity
   const centerS = start.distanceTo(center);
   const beads = [];
   for (let s = centerS % BEAD_SPACING; s < Math.min(length, beadsUntil); s += BEAD_SPACING) beads.push(s);
+  const lastBead = beads.length ? beads[beads.length - 1] : -Infinity;
 
-  const points = [];
+  // Organic bending of the naked DNA, easing in from straight.
+  const bendFrom = Math.min(length, lastBead + 0.3);
+  const axisAt = (s, out = new THREE.Vector3()) => {
+    const k = Math.max(0, s - bendFrom);
+    const ramp = smooth01(k / 2);
+    return out
+      .copy(start)
+      .addScaledVector(tangent, s)
+      .addScaledVector(a, 0.4 * Math.sin(k * 0.7) * ramp)
+      .addScaledVector(b, 0.3 * (1 - Math.cos(k * 0.5)) * ramp);
+  };
+
+  // Wrapped DNA around the beads, ending (tapered) just past the last bead.
+  const wrappedEnd = Number.isFinite(lastBead) ? Math.min(length, lastBead + 0.6) : length;
+  const wrapped = [];
   const p = new THREE.Vector3();
   const step = 0.02;
   let angle = 0;
-  for (let s = 0; s <= length; s += step) {
+  for (let s = 0; s <= wrappedEnd; s += step) {
     // Distance to the nearest bead centre, as a fraction of half the bead's width.
     const nearest = beads.reduce((best, c) => Math.min(best, Math.abs(s - c)), Infinity);
     const onBead = Math.max(0, 1 - nearest / (BEAD_SPACING * 0.36));
     const wrap = onBead * onBead * (3 - 2 * onBead);
     // 1.65 turns across the bead, a slow drift along the linker.
     angle += step * (wrap * (1.65 * Math.PI * 2) / (BEAD_SPACING * 0.5) + 0.8);
-    p.copy(start)
-      .addScaledVector(tangent, s)
+    axisAt(s, p)
       .addScaledVector(a, Math.cos(angle) * WRAP_RADIUS * wrap)
       .addScaledVector(b, Math.sin(angle) * WRAP_RADIUS * wrap);
-    points.push(p.clone());
+    wrapped.push(p.clone());
   }
+
+  // Naked double helix, starting where the wrapped tube tapers off.
+  const nakedStart = Number.isFinite(lastBead) ? lastBead + 0.3 : 0;
+  const twist = (Math.PI * 2) / NAKED_PITCH; // radians per unit along the axis
+  const frame = (s, outA, outB) => {
+    const e = 0.01;
+    const t = axisAt(s + e).sub(axisAt(s - e)).normalize();
+    outA.copy(a).addScaledVector(t, -a.dot(t)).normalize();
+    outB.crossVectors(t, outA);
+  };
+  const fa = new THREE.Vector3();
+  const fb = new THREE.Vector3();
+  const strandDirection = (s, which, out = new THREE.Vector3()) => {
+    frame(s, fa, fb);
+    const theta = s * twist + (which === 'B' ? NAKED_GROOVE_ANGLE : 0);
+    return out.copy(fa).multiplyScalar(Math.cos(theta)).addScaledVector(fb, Math.sin(theta));
+  };
+  const strandPoint = (s, which, out = new THREE.Vector3()) => {
+    const dir = strandDirection(s, which, new THREE.Vector3());
+    return axisAt(s, out).addScaledVector(dir, NAKED_HELIX_RADIUS);
+  };
+
+  const strandA = [];
+  const strandB = [];
+  for (let s = nakedStart; s <= length; s += NAKED_PITCH / 24) {
+    strandA.push(strandPoint(s, 'A'));
+    strandB.push(strandPoint(s, 'B'));
+  }
+  const rungs = [];
+  for (let s = nakedStart + NAKED_PITCH / NAKED_PAIRS_PER_TURN; s <= length; s += NAKED_PITCH / NAKED_PAIRS_PER_TURN) {
+    const pa = strandPoint(s, 'A');
+    const pb = strandPoint(s, 'B');
+    rungs.push({ a: pa, b: pb, middle: pa.clone().add(pb).multiplyScalar(0.5), s });
+  }
+
   return {
-    curve: new THREE.CatmullRomCurve3(points),
+    wrapped: new THREE.CatmullRomCurve3(wrapped),
     beads: beads.map((s) => start.clone().addScaledVector(tangent, s)),
     tangent,
+    axisAt,
+    naked: {
+      start: nakedStart,
+      strandA: new THREE.CatmullRomCurve3(strandA),
+      strandB: new THREE.CatmullRomCurve3(strandB),
+      rungs,
+      strandPoint,
+      strandDirection,
+    },
   };
 }

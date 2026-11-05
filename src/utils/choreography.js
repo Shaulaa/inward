@@ -22,6 +22,19 @@ export function exitPhases(progress, exit, diveSpan) {
 }
 
 /**
+ * Gap between the camera and a surface it closes in on, for t in 0..1. It
+ * starts at rest (easing in over the first `easeIn` of the move), then shrinks
+ * geometrically: the surface grows on screen at a steady rate and the camera
+ * is still moving at the very end — no "arrive and stall" before the next
+ * scene takes over.
+ */
+export function closingGap(t, startGap, endGap, easeIn = 0.3) {
+  const x = clamp(t);
+  const warped = (x < easeIn ? (x * x) / (2 * easeIn) : x - easeIn / 2) / (1 - easeIn / 2);
+  return startGap * Math.pow(endGap / startGap, warped);
+}
+
+/**
  * Identity up to `start`, then a cubic with slope 1 at `start` and slope 0 at
  * 1: the motion carries on, then settles instead of halting abruptly.
  */

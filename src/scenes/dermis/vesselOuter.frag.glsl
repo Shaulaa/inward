@@ -22,7 +22,7 @@ void main() {
   float fres = pow(1.0 - ndv, 2.5);
 
   // Endothelial nuclei, elongated along the vessel (local Z of the tube path is world Z here).
-  float cells = cellular3(vWorldPos * vec3(0.9, 0.9, 0.3));
+  float cells = cellular3(vWorldPos * vec3(0.9, 0.9, 0.3)).w;
   float nucleus = 1.0 - smoothstep(0.12, 0.3, cells);
 
   float closeUp = 1.0 - smoothstep(0.3, 3.0, dist);

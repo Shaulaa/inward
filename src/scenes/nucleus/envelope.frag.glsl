@@ -1,9 +1,13 @@
 // From outside (front faces) the envelope looks exactly like the nucleus in
-// the cell scene (same pattern and shading), which is what the camera was
-// pressing into. From inside it is a faint lilac shell with glowing pores.
+// the cell scene (same pattern, relief and shading), which is what the camera
+// was pressing into. From inside it is a faint lilac shell. The pores are
+// real openings: the envelope turns see-through in their channels, so the
+// camera enters the nucleus through the large pore at its entry point.
 uniform float uTime;
 uniform float uPoreScale;
 uniform float uWrinkleScale;
+uniform vec3 uHeroDir;
+uniform float uHeroSize;
 uniform vec3 uColorEnvelope;
 uniform vec3 uColorPoreRing;
 uniform vec3 uColorPoreCenter;
@@ -22,21 +26,31 @@ void main() {
   vec3 toCamera = cameraPosition - vWorldPos;
   float dist = length(toCamera);
   vec3 V = toCamera / dist;
-  float ndv = clamp(dot(N, V), 0.0, 1.0);
-  float fres = pow(1.0 - ndv, 2.4);
 
-  vec4 envelope = nuclearEnvelope(vObjPos * uPoreScale, vObjPos * uWrinkleScale + uTime * 0.03, uColorEnvelope, uColorPoreRing, uColorPoreCenter);
+  float height;
+  vec4 envelope = nuclearEnvelope(vObjPos * uPoreScale, vObjPos * uWrinkleScale + uTime * 0.03, uColorEnvelope, uColorPoreRing, uColorPoreCenter, uHeroDir, uHeroSize, height);
+  vec3 Nb = perturbNormal(vWorldPos, N, height * 0.035 / uPoreScale, 1.0);
+
+  float ndv = clamp(dot(Nb, V), 0.0, 1.0);
+  float fres = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 2.4);
 
   vec3 color;
   float alpha;
   if (outside) {
-    color = envelope.rgb * (0.25 + 0.85 * ndv) + uColorRim * fres * 0.9;
+    // Same lighting as the nucleus in the cell scene.
+    vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+    vec3 up = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+    vec3 L = normalize(V + up * 0.9 - right * 0.6);
+    float key = clamp((dot(Nb, L) + 0.3) / 1.3, 0.0, 1.0);
+    float sheen = pow(max(dot(Nb, normalize(L + V)), 0.0), 40.0) * 0.08;
+    color = envelope.rgb * (0.2 + 0.5 * ndv + 0.5 * key) + uColorRim * fres * 0.9 + sheen;
     alpha = 0.97;
   } else {
-    color = mix(uColorInner, uColorPoreRing, envelope.a * 0.6) * (0.4 + 0.6 * fres);
-    alpha = mix(0.1, 0.6, fres) + envelope.a * 0.25;
+    color = mix(uColorInner, uColorPoreRing, smoothstep(0.0, 0.5, envelope.a) * 0.6) * (0.4 + 0.6 * fres);
+    alpha = mix(0.1, 0.6, fres);
   }
-  // Thin film as the lens passes through it.
+  // Open pore channels, and a thin film as the lens passes through.
+  alpha *= 1.0 - smoothstep(0.55, 0.95, envelope.a);
   alpha *= smoothstep(0.0, 0.6, dist);
 
   gl_FragColor = vec4(color, alpha);

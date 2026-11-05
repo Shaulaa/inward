@@ -18,6 +18,32 @@ export class BaseScene {
     this.built = false;
     /** Materials whose `uTime` uniform follows the clock (see animate / tick). */
     this.timed = [];
+    /** Click-point anchors (see addAnchor), keyed by the hotspot id in src/content/story.js. */
+    this.anchors = new Map();
+  }
+
+  /**
+   * Register where a click point may sit: candidate positions on real objects
+   * of one kind (every mitochondrion, every hair…), in this scene's world
+   * space. The overlay picks one that is on screen and clear of the centre.
+   * `points` may be a function returning the array, for anchors that move
+   * with the camera. near / far: camera distances (scene units) at which the
+   * object reads well — closer it fills the lens, further it is lost in haze.
+   *
+   * @param {string} name
+   * @param {THREE.Vector3[] | (() => THREE.Vector3[])} points
+   * @param {{ near?: number, far?: number }} [range]
+   */
+  addAnchor(name, points, { near = 0, far = Infinity } = {}) {
+    this.anchors.set(name, { points, near, far });
+  }
+
+  /** Current candidates for a click point, or null if this scene has no such anchor. */
+  anchorCandidates(name) {
+    const anchor = this.anchors.get(name);
+    if (!anchor) return null;
+    const points = typeof anchor.points === 'function' ? anchor.points() : anchor.points;
+    return { points, near: anchor.near, far: anchor.far };
   }
 
   /** Register a material whose `uTime` uniform should follow the clock. */
@@ -77,6 +103,7 @@ export class BaseScene {
     });
     this.scene.clear();
     this.timed = [];
+    this.anchors.clear();
     this.onDispose();
     this.built = false;
   }

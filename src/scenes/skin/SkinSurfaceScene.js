@@ -68,6 +68,7 @@ export class SkinSurfaceScene extends BaseScene {
     this.#buildSurface(q);
     this.#buildHairs(rng, q.hairs);
     this.#buildRoute();
+    this.#buildAnchors();
 
     this.tmp = { position: new THREE.Vector3(), look: new THREE.Vector3() };
   }
@@ -142,6 +143,8 @@ export class SkinSurfaceScene extends BaseScene {
       [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
     }
     const mesh = new THREE.InstancedMesh(geometry, material, Math.min(count, candidates.length));
+    const hairAnchors = [];
+    const alongHair = template.getPointAt(0.35);
     const quaternion = new THREE.Quaternion();
     const euler = new THREE.Euler();
     const position = new THREE.Vector3();
@@ -155,10 +158,43 @@ export class SkinSurfaceScene extends BaseScene {
       quaternion.setFromEuler(euler);
       scale.setScalar(rng.range(0.6, 1.3));
       mesh.setMatrixAt(i, matrix.compose(position, quaternion, scale));
+      hairAnchors.push(alongHair.clone().applyMatrix4(matrix));
     }
+    this.addAnchor('hair', hairAnchors, { near: 0.6, far: 16 });
     mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingSphere();
     this.scene.add(mesh);
+  }
+
+  /** Click points: pore openings, and plain patches of the horny layer between pores. */
+  #buildAnchors() {
+    const t = this.target;
+    const near = this.field.pores.filter((p) => {
+      const d = Math.hypot(p.x - t.x, p.z - t.z);
+      return d > 1.2 && d < 16;
+    });
+    this.addAnchor(
+      'pore',
+      near.map((p) => new THREE.Vector3(p.x, this.field.sample(p.x, p.z).height, p.z)),
+      { near: 0.4, far: 13 },
+    );
+    // Coarse far out, fine near the target, where the lens ends up a fraction of a millimetre above the skin.
+    const patches = [];
+    const addPatches = (extent, step, minRadius) => {
+      for (let x = -extent; x <= extent; x += step) {
+        for (let z = -extent; z <= extent; z += step) {
+          const r = Math.hypot(x, z);
+          if (r < minRadius || r > extent) continue;
+          const px = t.x + x;
+          const pz = t.z + z;
+          if (this.field.nearestPoreDistance(px, pz) < 0.6) continue;
+          patches.push(new THREE.Vector3(px, this.field.sample(px, pz).height, pz));
+        }
+      }
+    };
+    addPatches(10, 1.25, 2.5);
+    addPatches(2.5, 0.3, 0.2);
+    this.addAnchor('surface', patches, { near: 0.3, far: 10 });
   }
 
   #buildRoute() {

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CompositePass } from './CompositePass.js';
+import { PostPass } from './PostPass.js';
 import { buildTimeline, liveWindow, sampleTimeline } from './timeline.js';
 
 /** Seconds a scene stays built after leaving the live window, so scrolling back and forth at a boundary doesn't rebuild it every frame. */
@@ -42,6 +43,7 @@ export class SceneManager {
     this.targetA = new THREE.WebGLRenderTarget(1, 1, targetOptions);
     this.targetB = new THREE.WebGLRenderTarget(1, 1, targetOptions);
     this.composite = new CompositePass();
+    this.post = new PostPass(quality.post);
   }
 
   setProgress(progress) {
@@ -57,7 +59,18 @@ export class SceneManager {
     const h = Math.max(1, Math.floor(height * pixelRatio));
     this.targetA.setSize(w, h);
     this.targetB.setSize(w, h);
+    this.post.setSize(w, h);
     for (const entry of this.entries) entry.instance?.resize(width, height);
+  }
+
+  /** The built scene at `index`, or null if it isn't live. */
+  sceneAt(index) {
+    return this.entries[index]?.instance ?? null;
+  }
+
+  /** Zoom-blur strength for the final image (the closing rewind). */
+  setRush(amount) {
+    this.post.setRush(amount);
   }
 
   /** Scene ids currently holding GPU resources (for debugging). */
@@ -83,7 +96,9 @@ export class SceneManager {
       time,
       aspect: this.width / this.height,
       rimColor: outgoing.exitRimColor,
+      target: this.post.input,
     });
+    this.post.render(this.renderer, time);
   }
 
   #syncLifecycle(state, time) {
@@ -164,5 +179,6 @@ export class SceneManager {
     this.targetA.dispose();
     this.targetB.dispose();
     this.composite.dispose();
+    this.post.dispose();
   }
 }

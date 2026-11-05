@@ -40,9 +40,11 @@ export class CompositePass {
 
   /**
    * @param {THREE.WebGLRenderer} renderer
-   * @param {{ a: THREE.Texture, b?: THREE.Texture | null, mix?: number, mode?: string, time: number, aspect: number, rimColor?: THREE.Color }} input
+   * @param {{ a: THREE.Texture, b?: THREE.Texture | null, mix?: number, mode?: string, time: number, aspect: number, rimColor?: THREE.Color, target?: THREE.WebGLRenderTarget | null }} input
+   *   target: where to draw. A render target receives linear HDR (tone mapping
+   *   and output colour space only apply when drawing to the canvas).
    */
-  render(renderer, { a, b = null, mix = 0, mode = 'crossfade', time, aspect, rimColor }) {
+  render(renderer, { a, b = null, mix = 0, mode = 'crossfade', time, aspect, rimColor, target = null }) {
     const u = this.material.uniforms;
     u.tA.value = a;
     u.tB.value = b ?? a;
@@ -52,7 +54,7 @@ export class CompositePass {
     u.uAspect.value = aspect;
     if (rimColor) u.uRimColor.value.copy(rimColor);
 
-    renderer.setRenderTarget(null);
+    renderer.setRenderTarget(target);
     renderer.render(this.mesh, this.camera);
   }
 

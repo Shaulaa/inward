@@ -34,7 +34,7 @@ void main() {
     color = uColorOuter * (0.3 + 0.8 * ndv) * (0.88 + 0.24 * grain);
     color = mix(color, uColorProtein, protein * 0.45);
     color *= 1.0 + closeUp * 0.35 * lipid;
-    color += uColorRim * fres * 0.5;
+    color += uColorRim * fres * 0.3;
     alpha = 0.97;
   } else {
     color = uColorInner * (0.35 + 0.65 * (grain + 0.5)) + uColorRim * fres * 0.8;

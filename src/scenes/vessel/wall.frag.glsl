@@ -22,9 +22,10 @@ vec4 membraneDetail(vec2 st, float circumference) {
   // Cobblestones, ~0.12 units across, seamless around the tube.
   float aroundA = floor(circumference * 8.0 + 0.5);
   vec2 pa = vec2(st.x * 8.0, st.y / circumference * aroundA);
-  vec4 cobble = voronoi2(pa + 0.25 * vec2(snoise(vec3(pa * 0.6, 3.0)), snoise(vec3(pa * 0.6, 9.0))), aroundA);
-  float seam = cobble.y - cobble.x;
-  float ridge = 1.0 - smoothstep(0.0, 0.12 + fwidth(seam), seam);
+  vec2 paw = pa + 0.25 * vec2(snoise(vec3(pa * 0.6, 3.0)), snoise(vec3(pa * 0.6, 9.0)));
+  vec4 cobble = voronoi2(paw, aroundA);
+  float seam = softEdge(cobble.y - cobble.x, 0.03);
+  float ridge = 1.0 - smoothstep(0.0, 0.12 + footprint(paw), seam);
   float dome = 1.0 - smoothstep(0.0, 0.7, cobble.x);
 
   // Caveolae: sparse small pits.
@@ -32,7 +33,7 @@ vec4 membraneDetail(vec2 st, float circumference) {
   vec2 pb = vec2(st.x * 15.0, st.y / circumference * aroundB);
   vec4 pits = voronoi2(pb, aroundB);
   float pitId = fract(sin(dot(pits.zw, vec2(41.3, 289.1))) * 15731.743);
-  float pit = (1.0 - smoothstep(0.08, 0.16 + fwidth(pits.x), pits.x)) * step(0.55, pitId);
+  float pit = (1.0 - smoothstep(0.08, 0.16 + footprint(pb), pits.x)) * step(0.55, pitId);
 
   // Protein specks.
   float speck = smoothstep(0.55, 0.8, snoise(vec3(st * 38.0, 1.7)) * 0.5 + 0.5);
@@ -58,8 +59,8 @@ void main() {
 
   // Thin, low-contrast cell junctions. fwidth keeps the line width stable in
   // screen space (no aliasing); they fade out with distance before they shimmer.
-  float edge = cells.y - cells.x;
-  float aa = fwidth(edge);
+  float edge = softEdge(cells.y - cells.x, 0.01);
+  float aa = footprint(cellSpace);
   float border = 1.0 - smoothstep(0.012, 0.045 + aa * 1.5, edge);
   border *= 1.0 - smoothstep(6.0, 18.0, dist);
   float nucleus = 1.0 - smoothstep(0.12, 0.32, cells.x);
@@ -97,8 +98,8 @@ void main() {
   // backs off as the lens gets close, where the surface detail takes over.
   float dT = distance(vWorldPos, uTarget);
   float breathe = 0.97 + 0.03 * sin(uTime * 2.2);
-  float glow = exp(-dT * dT / 1.6) * uFocus * breathe * mix(0.75, 1.0, smoothstep(0.3, 3.0, dist));
-  color += (base * 3.2 + uColorTarget * 0.08) * uColorTarget * glow;
+  float glow = exp(-dT * dT / 1.6) * uFocus * breathe * mix(0.6, 1.0, smoothstep(0.3, 3.0, dist));
+  color += (base * 2.2 + uColorTarget * 0.04) * uColorTarget * glow;
 
   gl_FragColor = vec4(color, 1.0);
 

@@ -157,6 +157,10 @@ export class DermisScene extends BaseScene {
         }
       }
     }
+    // Click point: the living cells of the middle layers and the basal layer they are born in.
+    const living = [...upper, ...basal].map((m) => new THREE.Vector3().setFromMatrixPosition(m)).filter((p) => p.y < -3.5);
+    this.addAnchor('epidermis', living, { near: 1.2, far: 12 });
+
     const cell = new THREE.IcosahedronGeometry(1, 2);
     this.#addInstanced(cell, this.animate(tissueMaterial({ color: '#e6b6a2', rimColor: '#ffe6dc', wobble: 0.08, wobbleScale: 1.4 })), upper);
     this.#addInstanced(cell.clone(), this.animate(tissueMaterial({ color: '#c48a74', rimColor: '#ffd6c4', wobble: 0.08, wobbleScale: 1.4 })), basal);
@@ -171,6 +175,17 @@ export class DermisScene extends BaseScene {
       position.setY(i, BASEMENT_Y + papillae(position.getX(i), position.getZ(i)));
     }
     geometry.computeVertexNormals();
+
+    // Click point: the wavy junction itself (the papillae), around the shaft the camera sinks through.
+    const junction = [];
+    for (let x = -9; x <= 9; x += 0.8) {
+      for (let z = -9; z <= 9; z += 0.8) {
+        const r = Math.hypot(x, z);
+        if (r > SHAFT + 0.4 && r < 9) junction.push(new THREE.Vector3(x, BASEMENT_Y + papillae(x, z), z));
+      }
+    }
+    this.addAnchor('papilla', junction, { near: 1.2, far: 10 });
+
     const material = this.animate(
       organicMaterial({
         vertexShader: organelleVertex,
@@ -278,6 +293,7 @@ export class DermisScene extends BaseScene {
     }
     const material = this.animate(tissueMaterial({ color: '#d68f88', rimColor: '#ffd0c8', wobble: 0.05 }));
     this.#addInstanced(new THREE.SphereGeometry(1, 18, 10), material, matrices);
+    this.addAnchor('fibroblast', matrices.map((m) => new THREE.Vector3().setFromMatrixPosition(m)), { near: 2, far: 14 });
   }
 
   /** The target vessel, a deeper horizontal plexus and capillary loops rising into the papillae. */
