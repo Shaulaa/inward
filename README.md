@@ -1,78 +1,79 @@
 # Inward
 
-Perjalanan scroll 3D ke dalam tubuh manusia. Mulai dari permukaan kulit, kamera menembus dermis, masuk ke pembuluh darah bersama sel darah merah, menembus membran sel, masuk ke inti sel, sampai ke heliks DNA, tanpa potongan scene yang terasa. Di akhir, kamera mundur cepat kembali ke kulit.
+A 3D scroll journey into the human body. Starting on the surface of the skin, the camera sinks through the dermis, rides the bloodstream with the red blood cells, pushes through a cell membrane, enters the nucleus and ends at the DNA double helix, with no visible scene cuts. At the end, the camera rushes back out to the skin.
 
-**Demo:** _(belum dideploy)_
+**Live demo:** https://inward-orcin.vercel.app
 
-> **Catatan:** visual di Inward adalah ilustrasi. Bentuk, warna, ukuran relatif, dan kepadatannya disederhanakan atau didramatisir supaya terbaca di layar. Teks dan fakta di dalamnya mengacu ke rujukan ilmiah, dan daftar lengkapnya (dengan tanda mana yang wajib dicek) ada di [docs/teks-dan-fakta.md](docs/teks-dan-fakta.md).
+![Passing through a cell membrane: the vessel opens onto the inside of a cell](docs/media/vessel-to-cell.gif)
 
-## Perjalanannya
+> **Note:** the visuals are an illustration. Shapes, colours, relative sizes and densities are simplified or dramatised so they read on screen. The texts and facts are based on scientific references; the full list, with a marker for each fact that still needs checking against a source, is in [docs/teks-dan-fakta.md](docs/teks-dan-fakta.md). The site itself is in Indonesian.
 
-| Scene | Skala | Yang dilihat |
-| --- | --- | --- |
-| Kulit | ±1 cm | Pori, alur, dan rambut halus yang makin besar |
-| Dermis | ±1 mm | Lapisan epidermis, papila, kolagen, sampai pembuluh darah |
-| Pembuluh darah | ±100 µm | Sel darah merah terbawa arus yang ikut berdenyut |
-| Sel | ±20 µm | Mitokondria, retikulum endoplasma, badan Golgi, inti sel |
-| Inti sel | ±5 µm | Kromatin, nukleolus, nukleosom, DNA telanjang |
-| DNA | ±2 nm | Heliks ganda dan pasangan basa A–T, C–G |
+## The journey
 
-Di setiap scene ada teks singkat yang muncul dan hilang mengikuti scroll, 2–3 titik klik berisi fakta (bisa dipakai dengan mouse, keyboard, dan layar sentuh), indikator skala, dan suara prosedural (opsional). Penutupnya menampilkan fakta bahwa DNA dalam satu sel panjangnya sekitar 2 meter kalau direntangkan.
+| Skin, ±1 cm | Dermis, ±1 mm |
+| --- | --- |
+| ![Skin surface with pores and fine hairs](docs/media/01-skin.jpg) | ![Inside the skin: epidermal cells, collagen and a blood vessel](docs/media/02-dermis.jpg) |
+| **Blood vessel, ±100 µm** | **Cell, ±20 µm** |
+| ![Red blood cells flowing through a vessel](docs/media/03-vessel.jpg) | ![Inside a cell: mitochondria, Golgi apparatus and the nucleus](docs/media/04-cell.jpg) |
+| **Nucleus, ±5 µm** | **DNA, ±2 nm** |
+| ![Chromatin fibres and a string of nucleosomes](docs/media/05-nucleus.jpg) | ![The DNA double helix with coloured base pairs](docs/media/06-dna.jpg) |
+
+Every scene has a short text that fades in and out with the scroll, 2–3 click points with a fact each (mouse, keyboard and touch), a scale indicator running from centimetres down to nanometres, and an optional procedural soundscape. The closing shows that the DNA in a single cell is about 2 metres long when stretched out, then zooms back out to the skin.
 
 ## Tech stack
 
-- **Three.js** dan **GLSL**: semua objek dibuat prosedural di kode, tanpa model atau tekstur dari luar.
-- **GSAP ScrollTrigger** dan **Lenis**: scroll yang halus, dipetakan ke satu garis waktu perjalanan.
-- **Web Audio API**: suara (detak jantung, aliran, dengung) disintesis di browser.
-- **Vite** (Rolldown) untuk build, **Vitest** untuk tes.
+- **Three.js** and **GLSL**: every object is generated in code. No external models or textures.
+- **GSAP ScrollTrigger** and **Lenis**: smooth scrolling, mapped onto one journey timeline.
+- **Web Audio API**: the heartbeat, flow and drones are synthesised in the browser.
+- **Vite** (Rolldown) for the build, **Vitest** for tests, **Vercel** for hosting.
 
-## Menjalankan
+## Running it
 
-Butuh Node.js 20 atau lebih baru.
+Requires Node.js 20 or newer.
 
 ```bash
 npm install
-npm run dev       # server pengembangan
-npm run build     # build produksi ke dist/
-npm run preview   # sajikan dist/ secara lokal
-npm test          # tes unit
-npm run facts     # tulis ulang docs/teks-dan-fakta.md dari src/content/story.js
+npm run dev       # development server
+npm run build     # production build into dist/
+npm run preview   # serve dist/ locally
+npm test          # unit tests
+npm run facts     # regenerate docs/teks-dan-fakta.md from src/content/story.js
 ```
 
-Parameter URL yang berguna:
+Useful URL parameters:
 
-- `?debug`: panel debug (fps, scene yang aktif, draw call, triangle, preset, snapshot).
-- `?quality=mobile` atau `?quality=desktop`: paksa preset kualitas (biasanya dipilih otomatis).
-- `?scale=fixed`: matikan resolusi dinamis, untuk membandingkan performa.
+- `?debug`: debug panel (fps, live scenes, draw calls, triangles, quality preset, snapshots).
+- `?quality=mobile` or `?quality=desktop`: force a quality preset (normally picked automatically).
+- `?scale=fixed`: turn off dynamic resolution, for performance comparisons.
 
-### Deploy
+### Deploying
 
-Proyek ini situs statis. `vercel.json` sudah menyiapkan build (`npm run build` ke `dist/`) dan header cache untuk aset ber-hash. Isi `VITE_SITE_URL` (lihat `.env`) dengan alamat situs tanpa garis miring di akhir, supaya URL gambar Open Graph dan Twitter Card absolut.
+It is a static site. `vercel.json` sets the build (`npm run build` into `dist/`) and long-lived cache headers for the hashed assets. Set `VITE_SITE_URL` (see `.env`) to the site's origin, without a trailing slash, so the Open Graph and Twitter Card image URLs are absolute.
 
-## Struktur
+## Project structure
 
 ```
 src/
-  content/story.js   semua teks: nama scene, skala, caption, fakta + tanda cek, penutup, fallback
-  core/              timeline, scene manager, transisi, post-processing, kualitas, resolusi dinamis
-  scenes/            satu folder per scene, masing-masing dengan koordinat dan shader sendiri
-  shaders/           pustaka GLSL bersama (noise, bump, selubung inti)
-  ui/                caption, titik klik, indikator skala, tombol suara, fallback
-  audio/             soundscape prosedural
-tests/               tes unit (timeline, geometri, choreography, rewind, culling, dll.)
-scripts/             export daftar teks dan fakta
+  content/story.js   all text: scene names, scales, captions, facts with check markers, closing, fallback
+  core/              timeline, scene manager, transitions, post-processing, quality presets, dynamic resolution
+  scenes/            one folder per scene, each with its own coordinates and shaders
+  shaders/           shared GLSL (noise, bump mapping, nuclear envelope)
+  ui/                captions, click points, scale indicator, sound toggle, fallback
+  audio/             procedural soundscape
+tests/               unit tests (timeline, geometry, choreography, rewind, culling, …)
+scripts/             export of all texts and facts
 ```
 
-## Tantangan teknis
+## Technical challenges
 
-- **Skala yang beda jauh.** Dari sentimeter ke nanometer ada selisih tujuh orde besaran. Satu dunia berukuran asli akan merusak presisi angka di GPU, jadi tiap scene punya koordinat dan kamera sendiri. Perpindahannya ditutup oleh objek yang sedang ditembus: kamera menekan permukaan, lalu lubang membran terbuka ke scene berikutnya.
-- **Cuma scene yang perlu yang hidup.** Hanya scene aktif dan tetangganya yang memegang memori GPU. Yang jauh dilepas beserta geometri, material, shader, dan teksturnya, dan tetangga dibangun saat browser sedang longgar. Penutup tetap dalam batas yang sama: kamera mundur memakai gambar resolusi penuh dari scene tengah yang diambil saat perjalanan maju, jadi hanya DNA dan kulit yang berupa scene 3D.
-- **Jumlah objek.** Ribuan sel darah, sel kulit, ribosom, dan pasangan basa digambar dengan instancing. Yang di luar pandangan atau yang sudah tertutup kabut tidak digambar, dan objek jauh memakai model yang lebih ringan. Tabung panjang (kromatin, pita DNA) dipotong per bagian agar bisa di-cull, lalu digabung per area agar draw call tetap sedikit.
-- **Biaya piksel.** Di transisi, dua scene digambar sekaligus. Resolusi render turun sementara kalau fps-nya rendah: sampai 1× ukuran CSS, di bawah itu hanya kalau fps benar-benar rendah, lalu naik lagi begitu pulih.
-- **Kompilasi shader.** Shader yang berat butuh 0,5–1 detik untuk dikompilasi di sebagian GPU (D3D lewat ANGLE). Scene tetangga dikompilasi secara paralel sebelum dibutuhkan.
-- **Artefak turunan.** Noise Voronoi dan `fwidth` di tepi sel menghasilkan garis putus-putus. Tepinya dilunakkan, dan nilai per sel dijauhkan dari peta tinggi bump.
-- **Aksesibilitas.** `prefers-reduced-motion` mematikan scroll halus, blur, dan zoom di penutup, serta memperlambat gerak ambien. Titik klik berupa tombol dengan area sentuh 44 px. Ada versi teks perjalanan kalau WebGL 2 tidak tersedia.
+- **Seven orders of magnitude.** From centimetres to nanometres in one world would wreck floating-point precision on the GPU, so every scene has its own coordinates and camera. Each hand-over is covered by the surface being pierced: the camera presses into it and a membrane-like hole opens onto the next scene.
+- **Only what is needed stays alive.** Only the active scene and its neighbours hold GPU memory. Distant scenes are released with their geometry, materials, shaders and textures, and neighbours are built while the browser is idle. The closing rewind stays within that budget: it zooms out through full-resolution images of the middle scenes captured on the way in, so only DNA and the skin are real 3D scenes while it plays.
+- **Lots of objects.** Thousands of red blood cells, skin cells, ribosomes and base pairs are instanced. Anything outside the view or lost in the haze is skipped, and distant objects use lighter models. Long tubes (chromatin, the DNA ribbon) are cut into chunks so they can be culled, then merged per region to keep draw calls low.
+- **Pixel cost.** During a transition two scenes are drawn at once. The render resolution drops while the frame rate is low: down to 1× CSS pixels, below that only when frames are really slow, and back up once they recover.
+- **Shader compilation.** The heavier shaders take 0.5–1 s to compile on some GPUs (D3D via ANGLE), so neighbouring scenes are compiled in parallel before they are needed.
+- **Derivative artefacts.** Voronoi noise and `fwidth` along cell borders produced dotted lines; the edges are softened and per-cell values are kept out of the bump height.
+- **Accessibility.** `prefers-reduced-motion` turns off scroll smoothing, blur and the zoom in the closing, and slows ambient motion. Click points are buttons with 44 px touch targets. Without WebGL 2, the page shows the journey as text.
 
-## Yang belum diuji
+## Not tested yet
 
-Performa dan tampilan di HP asli (GPU mobile, iOS Safari, panas perangkat) belum diuji. Pengujian sejauh ini memakai browser desktop dan emulasi perangkat.
+Performance and rendering on real phones (mobile GPUs, iOS Safari, thermal throttling) have not been tested. Testing so far used desktop browsers and device emulation.
