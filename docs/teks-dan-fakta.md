@@ -18,7 +18,7 @@ Tanda cek: **wajib** = ada angka atau perkiraan, cocokkan ke sumber primer sebel
    **Cek: wajib** — Jumlah kelenjar keringat 2–4 juta. Saran sumber: Guyton & Hall, Textbook of Medical Physiology.
 
 4. **Titik klik — Rambut halus** (label: Rambut halus, id: `skin/hair`)  
-   Hampir seluruh kulit ditumbuhi rambut halus (vellus). Tiap folikel punya otot kecil penegak rambut. Otot inilah yang bikin bulu kuduk berdiri saat merinding.  
+   Hampir seluruh kulit ditumbuhi rambut halus (vellus). Folikel rambut yang lebih besar punya otot kecil penegak rambut, dan otot inilah yang bikin bulu kuduk berdiri saat merinding.  
    **Cek: disarankan** — Rambut vellus dan otot arrector pili. Saran sumber: Ross & Pawlina, Histology: A Text and Atlas.
 
 5. **Titik klik — Lapisan tanduk** (label: Lapisan tanduk, id: `skin/surface`)  

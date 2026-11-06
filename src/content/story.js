@@ -55,7 +55,7 @@ export const SCENES = {
         id: 'hair',
         label: 'Rambut halus',
         title: 'Rambut halus',
-        text: 'Hampir seluruh kulit ditumbuhi rambut halus (vellus). Tiap folikel punya otot kecil penegak rambut. Otot inilah yang bikin bulu kuduk berdiri saat merinding.',
+        text: 'Hampir seluruh kulit ditumbuhi rambut halus (vellus). Folikel rambut yang lebih besar punya otot kecil penegak rambut, dan otot inilah yang bikin bulu kuduk berdiri saat merinding.',
         check: { level: 'disarankan', what: 'Rambut vellus dan otot arrector pili', source: REF.histology },
       },
       {
