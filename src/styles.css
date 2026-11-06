@@ -126,9 +126,9 @@ body::-webkit-scrollbar {
 .sound-toggle {
   --beat: 0;
   position: fixed;
-  /* Icon (26 × 22) centred in the 44 px button: its edges land 24 px from the corner. */
-  right: 16px;
-  bottom: 13px;
+  /* The 40 px disc sits centred in the 44 px button: its edge lands 24 px from the corner. */
+  right: 22px;
+  bottom: 22px;
   z-index: 3;
   display: grid;
   place-items: center;
@@ -140,14 +140,32 @@ body::-webkit-scrollbar {
   border: 0;
   border-radius: 50%;
   cursor: pointer;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 6px rgba(0, 0, 0, 0.35));
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
   transition: transform 0.2s ease, opacity 0.2s ease;
 }
 
+/* A dark, slightly see-through disc behind the icon, so it reads over any scene. */
+.sound-toggle::before {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  background: rgba(8, 10, 14, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
 .sound-toggle__icon {
+  position: relative;
   overflow: visible;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.4));
+}
+
+.sound-toggle:hover::before {
+  background: rgba(8, 10, 14, 0.7);
+  border-color: rgba(255, 255, 255, 0.45);
 }
 
 .sound-toggle__speaker {
@@ -188,7 +206,7 @@ body::-webkit-scrollbar {
 }
 
 .sound-toggle:hover {
-  transform: scale(1.1);
+  transform: scale(1.06);
 }
 
 .sound-toggle:focus {
@@ -834,10 +852,10 @@ body::-webkit-scrollbar {
     left: 16px;
   }
 
-  /* Icon edges 16 px from the corner, like the scale indicator. */
+  /* Disc edge 16 px from the corner, like the scale indicator. */
   .sound-toggle {
-    right: 7px;
-    bottom: 5px;
+    right: 14px;
+    bottom: 14px;
   }
 
   .note {
