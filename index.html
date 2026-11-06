@@ -34,9 +34,14 @@
       <span class="brand__tag">Perjalanan ke dalam tubuh manusia</span>
     </header>
 
-    <button id="sound-toggle" class="sound-toggle" type="button" aria-pressed="false" hidden>
-      <span class="sound-toggle__dot" aria-hidden="true"></span>
-      <span class="sound-toggle__label">Suara: mati</span>
+    <button id="sound-toggle" class="sound-toggle" type="button" aria-label="Suara" aria-pressed="false" title="Suara: mati" hidden>
+      <svg class="sound-toggle__icon" viewBox="0 0 28 24" width="26" height="22" aria-hidden="true" focusable="false">
+        <path class="sound-toggle__speaker" d="M3 9h4l6-5v16l-6-5H3z" />
+        <line class="sound-toggle__mute" x1="2" y1="3" x2="23" y2="21" />
+        <rect class="sound-toggle__bar" x="16.5" y="9" width="2" height="6" rx="1" />
+        <rect class="sound-toggle__bar" x="20.5" y="6.5" width="2" height="11" rx="1" />
+        <rect class="sound-toggle__bar" x="24.5" y="9" width="2" height="6" rx="1" />
+      </svg>
     </button>
 
     <p id="scroll-hint" class="scroll-hint">Scroll untuk masuk</p>

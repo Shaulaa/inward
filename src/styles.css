@@ -114,59 +114,101 @@ body::-webkit-scrollbar {
   opacity: 0;
 }
 
-/* Sound on/off. Opt-in: audio may only start after a user gesture. */
+/*
+ * Sound on/off: a plain white speaker icon in the bottom-right corner,
+ * mirroring the scale indicator on the left (the icon sits 24 px from the
+ * edges; the 44 px hit area around it reaches a little closer). A soft
+ * shadow keeps it visible over bright scenes such as the skin. Off: the
+ * speaker struck through. On: three small bars pulsing with the heartbeat
+ * (--beat, set by SoundToggle.js). Opt-in: audio may only start after a
+ * user gesture.
+ */
 .sound-toggle {
+  --beat: 0;
   position: fixed;
-  top: 20px;
-  right: 24px;
+  /* Icon (26 × 22) centred in the 44 px button: its edges land 24 px from the corner. */
+  right: 16px;
+  bottom: 13px;
   z-index: 3;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 14px 7px 12px;
-  font: 500 11px/1 var(--font);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--ink);
-  background: rgba(8, 10, 14, 0.42);
-  border: 1px solid rgba(244, 233, 230, 0.22);
-  border-radius: 999px;
-  backdrop-filter: blur(6px);
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  color: #fff;
+  background: none;
+  border: 0;
+  border-radius: 50%;
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 6px rgba(0, 0, 0, 0.35));
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.sound-toggle__icon {
+  overflow: visible;
+}
+
+.sound-toggle__speaker {
+  fill: currentColor;
+}
+
+.sound-toggle__mute {
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.sound-toggle__bar {
+  display: none;
+  fill: currentColor;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.sound-toggle__bar:nth-of-type(1) {
+  transform: scaleY(calc(0.55 + var(--beat) * 0.45));
+}
+
+.sound-toggle__bar:nth-of-type(2) {
+  transform: scaleY(calc(0.45 + var(--beat) * 0.55));
+}
+
+.sound-toggle__bar:nth-of-type(3) {
+  transform: scaleY(calc(0.6 + var(--beat) * 0.4));
+}
+
+.sound-toggle[aria-pressed='true'] .sound-toggle__mute {
+  display: none;
+}
+
+.sound-toggle[aria-pressed='true'] .sound-toggle__bar {
+  display: inline;
 }
 
 .sound-toggle:hover {
-  background: rgba(8, 10, 14, 0.6);
-  border-color: rgba(244, 233, 230, 0.4);
+  transform: scale(1.1);
+}
+
+.sound-toggle:focus {
+  outline: none;
 }
 
 .sound-toggle:focus-visible {
-  outline: 2px solid #f4e9e6;
-  outline-offset: 3px;
+  outline: 2px solid #fff;
+  outline-offset: 0;
+  box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.35);
 }
 
 .sound-toggle[hidden] {
   display: none;
 }
 
-.sound-toggle__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  border: 1px solid currentColor;
-  transition: background 0.2s ease;
-}
-
-.sound-toggle[aria-pressed='true'] .sound-toggle__dot {
-  background: #ff8a80;
-  border-color: #ff8a80;
-  box-shadow: 0 0 8px rgba(255, 138, 128, 0.7);
-}
-
 .sound-toggle:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
+  transform: none;
 }
 
 /*
@@ -625,7 +667,7 @@ body::-webkit-scrollbar {
 
   .fact {
     left: 16px;
-    right: 16px;
+    right: 64px;
     top: auto;
     bottom: 16px;
     width: auto;
@@ -774,7 +816,8 @@ body::-webkit-scrollbar {
 .debug-hud {
   position: fixed;
   right: 16px;
-  bottom: 16px;
+  /* Above the sound button (bottom-right) and below the desktop fact card (top-right). */
+  bottom: 72px;
   margin: 0;
   padding: 10px 12px;
   font: 11px/1.5 var(--mono);
@@ -791,9 +834,10 @@ body::-webkit-scrollbar {
     left: 16px;
   }
 
+  /* Icon edges 16 px from the corner, like the scale indicator. */
   .sound-toggle {
-    top: 12px;
-    right: 16px;
+    right: 7px;
+    bottom: 5px;
   }
 
   .note {
@@ -823,7 +867,6 @@ body::-webkit-scrollbar {
 
 @media (prefers-reduced-motion: reduce) {
   .sound-toggle,
-  .sound-toggle__dot,
   .scale__step,
   .scale__step::before,
   .hotspot,
