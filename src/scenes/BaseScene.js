@@ -20,6 +20,27 @@ export class BaseScene {
     this.timed = [];
     /** Click-point anchors (see addAnchor), keyed by the hotspot id in src/content/story.js. */
     this.anchors = new Map();
+    /** Per-instance culling for instanced layers (see InstanceCuller), run after every camera move. */
+    this.cullers = [];
+  }
+
+  /** Follow a render-scale change: point sprites are sized in device pixels. */
+  setPixelRatio(pixelRatio) {
+    this.scene.traverse((object) => {
+      const uniform = object.material?.uniforms?.uPixelRatio;
+      if (uniform) uniform.value = pixelRatio;
+    });
+  }
+
+  /** Register an InstanceCuller; the SceneManager runs it each time this scene is drawn. */
+  addCuller(culler) {
+    this.cullers.push(culler);
+    return culler;
+  }
+
+  /** Pack only the visible instances of every culled layer, for this frame's camera. */
+  cull() {
+    for (const culler of this.cullers) culler.update(this.camera);
   }
 
   /**
@@ -83,6 +104,10 @@ export class BaseScene {
 
   dispose() {
     if (!this.built) return;
+    // Everything the scene put on the GPU goes: geometry, textures, and the
+    // materials — which also releases their shader programs once no other
+    // live scene shares them (they are compiled again, in parallel, the next
+    // time the scene is built as a neighbour).
     const disposeMaterial = (material) => {
       for (const value of Object.values(material)) {
         if (value?.isTexture) value.dispose();
@@ -104,6 +129,7 @@ export class BaseScene {
     this.scene.clear();
     this.timed = [];
     this.anchors.clear();
+    this.cullers = [];
     this.onDispose();
     this.built = false;
   }

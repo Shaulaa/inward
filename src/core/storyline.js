@@ -8,11 +8,12 @@ import { clamp, smoothstep } from '../utils/math.js';
  * Closing sequence:
  *   hold    the final DNA view stays while the "2 metre" fact shows,
  *   rewind  the camera rushes back out through every scene to the skin —
- *           the journey played backwards, fast, through the same scenes and
- *           transitions (so it obeys the same "active scene ± 1" rendering),
+ *           the journey played backwards, fast (≈180 vh for the whole
+ *           journey), through the same scenes and transitions (so it obeys
+ *           the same "active scene ± 1" rendering),
  *   rest    back on the skin; the closing line stays until the end.
  */
-export const OUTRO_UNITS = { hold: 0.4, rewind: 0.8, rest: 0.2 };
+export const OUTRO_UNITS = { hold: 0.4, rewind: 0.4, rest: 0.2 };
 
 /** Length of every text fade in and out (≈ 27 vh). */
 export const TEXT_FADE = 0.06;
@@ -88,6 +89,16 @@ export function journeyProgressAt(storyline, u) {
   if (u <= holdEnd) return 1;
   if (u < rewindEnd) return 1 - smoothstep(holdEnd, rewindEnd, u);
   return 0;
+}
+
+/**
+ * Progress through the closing rewind (0 = the DNA view, 1 = back on the
+ * skin), eased so it starts and ends at rest; null outside the rewind.
+ * Rendered by the SceneManager from snapshots (see rewind.js).
+ */
+export function rewindAt(storyline, u) {
+  if (phaseAt(storyline, u) !== 'rewind') return null;
+  return smoothstep(storyline.holdEnd, storyline.rewindEnd, u);
 }
 
 /** Opacity (0..1) of something shown over `window`, fading in and out over `fade` units. */

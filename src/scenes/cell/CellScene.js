@@ -1,10 +1,12 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BaseScene } from '../BaseScene.js';
 import { createParticles } from '../shared/particles.js';
 import { ENDOTHELIUM, NUCLEAR_ENVELOPE } from '../shared/palette.js';
 import { CELL_RADIUS, NUCLEUS_RADIUS, blocksNucleusView, createCellRoute, distanceToRoute } from './cellLayout.js';
 import { createCisternaGeometry } from './cellGeometry.js';
-import { createTaperedTube } from '../shared/geometry.js';
+import { createTaperedTube, fogLimit, splitByDirection } from '../shared/geometry.js';
+import { InstanceCuller } from '../shared/instanceCulling.js';
 import { organicMaterial } from '../shared/materials.js';
 import organelleVertex from '../../shaders/organelle.vert.glsl?raw';
 import organelleFragment from '../../shaders/organelle.frag.glsl?raw';
@@ -45,6 +47,10 @@ const ENVELOPE_END_GAP = 0.22;
 const HERO_PORE_SIZE = 1.6;
 
 const ORIGIN = new THREE.Vector3();
+/** Beyond this the cytoplasm haze (FogExp2 at FOG_DENSITY_CELL) has swallowed small organelles (≥98 %). */
+const FOG_LIMIT = 30;
+/** Mitochondria further than this (and ≥70 % fogged) use a lighter capsule. */
+const MITO_LOD_DISTANCE = 16;
 
 export class CellScene extends BaseScene {
   constructor(context) {
@@ -62,7 +68,8 @@ export class CellScene extends BaseScene {
     this.scene.background = new THREE.Color(FOG_COLOR_ENTRY);
 
     this.camera.near = 0.01;
-    this.camera.far = 80;
+    // The cytoplasm haze is complete by here (the entry haze is even denser).
+    this.camera.far = fogLimit(FOG_DENSITY_CELL);
     this.camera.fov = 62;
     this.camera.updateProjectionMatrix();
     this.scene.add(this.camera);
@@ -105,15 +112,22 @@ export class CellScene extends BaseScene {
           uColorProtein: { value: new THREE.Color('#a84a55') },
           uColorProteinInner: { value: new THREE.Color('#5a6a9a') },
           uColorRim: { value: new THREE.Color('#c0708a') },
+          uSphereRadius: { value: CELL_RADIUS },
         },
         side: THREE.DoubleSide,
         transparent: true,
         depthWrite: false,
       }),
     );
-    const membrane = new THREE.Mesh(new THREE.IcosahedronGeometry(CELL_RADIUS, detail), material);
-    membrane.renderOrder = 10;
-    this.scene.add(membrane);
+    // In patches, so the parts behind or beside the camera are culled; the
+    // vertex shader bulges the surface by up to uAmplitude.
+    const sphere = new THREE.IcosahedronGeometry(CELL_RADIUS, detail);
+    for (const patch of splitByDirection(sphere, { cells: 2, margin: 1 })) {
+      const membrane = new THREE.Mesh(patch, material);
+      membrane.renderOrder = 10;
+      this.scene.add(membrane);
+    }
+    sphere.dispose();
   }
 
   #buildNucleus() {
@@ -137,7 +151,10 @@ export class CellScene extends BaseScene {
         },
       }),
     );
-    this.scene.add(new THREE.Mesh(new THREE.SphereGeometry(NUCLEUS_RADIUS, 160, 120), material));
+    // In patches: during the dive the lens is right on its surface and sees only a small part of it.
+    const sphere = new THREE.SphereGeometry(NUCLEUS_RADIUS, 160, 120);
+    for (const patch of splitByDirection(sphere, { cells: 2, margin: 0.3 })) this.scene.add(new THREE.Mesh(patch, material));
+    sphere.dispose();
   }
 
   #buildMitochondria(rng, count) {
@@ -155,6 +172,8 @@ export class CellScene extends BaseScene {
       }),
     );
     const mesh = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.55, 2.0, 8, 24, 6), material, count);
+    const far = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.55, 2.0, 6, 16, 4), material, count);
+    const matrices = [];
 
     const placed = [];
     const position = new THREE.Vector3();
@@ -179,12 +198,11 @@ export class CellScene extends BaseScene {
       quaternion.setFromAxisAngle(rng.onSphere(axis), rng.range(0, Math.PI * 2));
       const s = rng.range(0.8, 1.2);
       scale.set(s, s * rng.range(0.9, 1.4), s);
-      mesh.setMatrixAt(placed.length - 1, matrix.compose(position, quaternion, scale));
+      matrices.push(matrix.compose(position, quaternion, scale).clone());
     }
-    mesh.count = placed.length;
-    mesh.instanceMatrix.needsUpdate = true;
-    mesh.computeBoundingSphere();
-    this.scene.add(mesh);
+    // Only the mitochondria in view are drawn; distant ones use the lighter capsule.
+    this.addCuller(new InstanceCuller(mesh, matrices, { lod: far, lodDistance: MITO_LOD_DISTANCE, maxDistance: FOG_LIMIT }));
+    this.scene.add(mesh, far);
     this.addAnchor('mitochondrion', placed, { near: 2.5, far: 16 });
   }
 
@@ -214,6 +232,7 @@ export class CellScene extends BaseScene {
     );
 
     const curves = [];
+    const tubes = [];
     const axis = new THREE.Vector3();
     const u = new THREE.Vector3();
     const v = new THREE.Vector3();
@@ -262,7 +281,12 @@ export class CellScene extends BaseScene {
         taperLength: ER_TAPER_LENGTH,
         fadeLength: ER_FADE_LENGTH,
       });
-      this.scene.add(new THREE.Mesh(geometry, material));
+      tubes.push(geometry);
+    }
+    // All tubules share one material: one mesh, one draw call.
+    if (tubes.length) {
+      this.scene.add(new THREE.Mesh(mergeGeometries(tubes), material));
+      tubes.forEach((g) => g.dispose());
     }
     // Click point on the opaque middle of each tubule.
     this.addAnchor('er', curves.map(({ curve }) => curve.getPointAt(0.5)), { near: 2, far: 18 });
@@ -273,6 +297,7 @@ export class CellScene extends BaseScene {
     const material = new THREE.MeshLambertMaterial({ color: '#e9dcff', emissive: '#3a2a5a' });
     const total = (erCurves.length ? erCount : 0) + freeCount;
     const mesh = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.05, 1), material, total);
+    const matrices = [];
 
     const position = new THREE.Vector3();
     const tangent = new THREE.Vector3();
@@ -291,7 +316,7 @@ export class CellScene extends BaseScene {
         rng.onSphere(offset);
         offset.addScaledVector(tangent, -offset.dot(tangent)).normalize();
         position.addScaledVector(offset, radius + 0.03);
-        mesh.setMatrixAt(index++, matrix.makeTranslation(position));
+        matrices[index++] = matrix.makeTranslation(position).clone();
       }
     }
 
@@ -304,12 +329,11 @@ export class CellScene extends BaseScene {
       if (distanceToRoute(position, this.route.samples) < 1.4) continue;
       // No stray specks on the nucleus face from any point of the route.
       if (blocksNucleusView(position, this.route.viewCameras, 0.2)) continue;
-      mesh.setMatrixAt(index++, matrix.makeTranslation(position));
+      matrices[index++] = matrix.makeTranslation(position).clone();
     }
 
-    mesh.count = index;
-    mesh.instanceMatrix.needsUpdate = true;
-    mesh.computeBoundingSphere();
+    // Only the ribosomes in view (and not lost in the haze) are drawn.
+    this.addCuller(new InstanceCuller(mesh, matrices, { maxDistance: FOG_LIMIT }));
     this.scene.add(mesh);
   }
 

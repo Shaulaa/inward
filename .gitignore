@@ -1,5 +1,17 @@
+# Dependencies and build output
 node_modules
 dist
+
+# Local env overrides (the committed .env holds no secrets, only the public site URL)
 *.local
-.DS_Store
+.env.*.local
+
+# Vercel CLI
+.vercel
+
+# Tooling and OS files
 .playwright-mcp
+coverage
+*.log
+.DS_Store
+Thumbs.db

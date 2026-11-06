@@ -4,24 +4,22 @@ import WebGL from 'three/addons/capabilities/WebGL.js';
 import { gsap } from 'gsap';
 import { SceneManager } from './core/SceneManager.js';
 import { ScrollDirector } from './core/ScrollDirector.js';
-import { createQuality } from './core/quality.js';
+import { createQuality, detectTier } from './core/quality.js';
+import { ResolutionGovernor } from './core/resolution.js';
 import { JOURNEY, SCROLL_VH_PER_UNIT } from './core/journey.js';
 import { DebugHud } from './ui/DebugHud.js';
 import { AudioEngine } from './audio/AudioEngine.js';
 import { SoundToggle } from './ui/SoundToggle.js';
 import { ScaleIndicator } from './ui/ScaleIndicator.js';
+import { showFallback } from './ui/Fallback.js';
 import { Captions } from './ui/Captions.js';
 import { Hotspots } from './ui/Hotspots.js';
-import { buildStoryline, journeyProgressAt, phaseAt } from './core/storyline.js';
+import { buildStoryline, journeyProgressAt, phaseAt, rewindAt } from './core/storyline.js';
 import { NOTE, OUTRO, SCENES, UI } from './content/story.js';
 import { smoothstep } from './utils/math.js';
 
-function showFallback(message) {
-  const fallback = document.querySelector('#fallback');
-  fallback.textContent = message;
-  fallback.hidden = false;
-  document.documentElement.classList.add('no-webgl');
-}
+/** Seconds the illustration note stays up after the page opens. */
+const NOTE_SECONDS = 7;
 
 function boot() {
   const canvas = document.querySelector('#webgl');
@@ -29,7 +27,7 @@ function boot() {
   const hint = document.querySelector('#scroll-hint');
 
   if (!WebGL.isWebGL2Available()) {
-    showFallback('Browser ini belum mendukung WebGL 2, jadi perjalanan 3D-nya nggak bisa ditampilkan.');
+    showFallback('unsupported');
     return;
   }
 
@@ -38,14 +36,17 @@ function boot() {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
   } catch (error) {
     console.error('[inward] WebGL renderer failed to start', error);
-    showFallback('WebGL gagal dijalankan di perangkat ini.');
+    showFallback('failed');
     return;
   }
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
   renderer.info.autoReset = false;
 
-  const quality = createQuality();
+  const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const quality = createQuality(detectTier(), { reducedMotion: motionQuery.matches });
+  // The active preset, for styling and for checking which one a device got.
+  document.documentElement.dataset.quality = quality.tier;
   const manager = new SceneManager({ renderer, journey: JOURNEY, quality });
 
   // The page scroll is the journey plus the closing sequence after DNA
@@ -55,28 +56,49 @@ function boot() {
   /** Scroll position in timeline units. */
   let storyU = 0;
 
-  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /** @type {ResolutionGovernor | null} Set up below, once the canvas size is known. */
+  let governor = null;
   const director = new ScrollDirector({
     track,
-    reducedMotion,
+    reducedMotion: quality.reducedMotion,
     onProgress: (progress) => {
       storyU = progress * storyline.total;
       manager.setProgress(journeyProgressAt(storyline, storyU));
+      const phase = phaseAt(storyline, storyU);
+      manager.setOutro(phase === 'journey' ? null : { phase, rewind: rewindAt(storyline, storyU) });
+      // No resolution changes during the rewind: a resize there would show as a hitch.
+      if (governor) governor.paused = phase === 'rewind';
       hint?.classList.toggle('is-hidden', progress > 0.01);
     },
   });
 
+  // prefers-reduced-motion, followed live if the reader changes it: no scroll
+  // smoothing, no zoom blur, gentle crossfades instead of the rushing rewind,
+  // slow ambient motion, and no drifting or pulsing overlays (styles.css).
+  motionQuery.addEventListener?.('change', (event) => {
+    quality.reducedMotion = event.matches;
+    quality.motion = event.matches ? 0.3 : 1;
+    director.setReducedMotion(event.matches);
+  });
+
   // Size from the canvas's laid-out box, so the drawing buffer always matches
   // what CSS shows (window.innerWidth would include a scrollbar if one existed).
+  // Render scale: the preset's pixel ratio (the device's, capped). The
+  // governor lowers it in steps while the frame rate is low — to 1× CSS at
+  // most, below that only when frames are really slow — and raises it again
+  // once it has recovered (see resolution.js). ?scale=fixed keeps it constant.
+  governor = new URLSearchParams(window.location.search).get('scale') === 'fixed' ? null : new ResolutionGovernor({ max: quality.pixelRatio });
   const resize = () => {
     manager.setSize(canvas.clientWidth || window.innerWidth, canvas.clientHeight || window.innerHeight, quality.pixelRatio);
+    document.documentElement.dataset.renderScale = quality.pixelRatio.toFixed(2);
   };
   resize();
   new ResizeObserver(resize).observe(canvas);
 
+  // The GPU was reset (driver update, out of memory): say so and offer a reload.
   canvas.addEventListener('webglcontextlost', (event) => {
     event.preventDefault();
-    console.warn('[inward] WebGL context lost');
+    showFallback('contextLost');
   });
 
   const hud = new URLSearchParams(window.location.search).has('debug') ? new DebugHud(document.body, JOURNEY) : null;
@@ -84,12 +106,22 @@ function boot() {
   // Sound is opt-in (browsers require a user gesture before audio can play).
   const audio = AudioEngine.isSupported() ? new AudioEngine() : null;
   if (audio) new SoundToggle(document.querySelector('#sound-toggle'), audio, () => gsap.ticker.time);
-  document.addEventListener('visibilitychange', () => audio?.setPageVisible(!document.hidden, gsap.ticker.time));
+  document.addEventListener('visibilitychange', () => {
+    audio?.setPageVisible(!document.hidden, gsap.ticker.time);
+    // A background tab's slow (throttled) frames say nothing about the device.
+    governor?.reset();
+  });
   const spans = manager.timeline.spans;
   const scale = new ScaleIndicator(document.body, JOURNEY.scenes);
 
+  // The illustration note is read at the start, fades after a few seconds,
+  // and comes back with the closing text at the very end.
   const note = Object.assign(document.createElement('p'), { className: 'note', textContent: NOTE });
   document.body.append(note);
+  let noteExpired = false;
+  setTimeout(() => {
+    noteExpired = true;
+  }, NOTE_SECONDS * 1000);
 
   const captions = new Captions(document.body, [
     ...storyline.scenes.map((scene) => ({ id: scene.id, window: scene.caption, ...SCENES[scene.id].caption })),
@@ -107,7 +139,7 @@ function boot() {
         },
       },
     },
-  ]);
+  ], { reducedMotion: () => quality.reducedMotion });
 
   // Click points stay clear of every other overlay.
   const fixedOverlays = [document.querySelector('.brand'), note, scale.root, document.querySelector('#sound-toggle')];
@@ -117,7 +149,9 @@ function boot() {
     ui: UI,
     sceneAt: (index) => manager.sceneAt(index),
     blockers: () => [
-      ...fixedOverlays.filter((element) => element && !element.hidden).map((element) => element.getBoundingClientRect()),
+      ...fixedOverlays
+        .filter((element) => element && !element.hidden && !element.classList.contains('is-faded'))
+        .map((element) => element.getBoundingClientRect()),
       ...(hint && !hint.classList.contains('is-hidden') ? [hint.getBoundingClientRect()] : []),
       ...captions.visibleRects(),
     ],
@@ -125,29 +159,41 @@ function boot() {
 
   // Zoom blur while the closing rewind rushes back to the skin, following its speed.
   let rush = 0;
-  let lastJourney = manager.progress;
+  let lastRewind = 0;
+  // Ambient (time-driven) motion runs on its own clock, slowed under reduced motion.
+  let sceneTime = 0;
 
   // Runs after Lenis on the same GSAP ticker, so progress is fresh each frame.
   gsap.ticker.add((time, deltaMs) => {
     const dt = Math.min(deltaMs / 1000, 0.1);
+    const renderScale = document.hidden ? null : governor?.update(deltaMs / 1000);
+    if (renderScale) {
+      quality.pixelRatio = renderScale;
+      resize();
+    }
     renderer.info.reset();
-    manager.render(time, dt);
+    // Full motion uses the real clock (the vessel's heartbeat stays in step
+    // with the audio); reduced motion a slowed one (its pulse is off anyway).
+    sceneTime = quality.motion === 1 ? time : sceneTime + dt * quality.motion;
+    manager.render(sceneTime, dt * quality.motion);
     const { from, to, mix } = manager.state;
     audio?.update({ fromId: spans[from].id, toId: to !== null ? spans[to].id : null, mix, time });
     scale.update(manager.state.active);
     captions.update(storyU);
+    note.classList.toggle('is-faded', noteExpired && storyU < storyline.outro.closing.start);
     hotspots.update({ u: storyU, state: manager.state, time, width: canvas.clientWidth || window.innerWidth, height: canvas.clientHeight || window.innerHeight });
 
-    const speed = Math.abs(manager.progress - lastJourney) / Math.max(dt, 1e-3);
-    lastJourney = manager.progress;
-    const rushTarget = !reducedMotion && phaseAt(storyline, storyU) === 'rewind' ? smoothstep(0.1, 1.2, speed) : 0;
+    const rewind = rewindAt(storyline, storyU);
+    const speed = rewind === null ? 0 : Math.abs(rewind - lastRewind) / Math.max(dt, 1e-3);
+    lastRewind = rewind ?? lastRewind;
+    const rushTarget = !quality.reducedMotion && rewind !== null ? smoothstep(0.1, 1.2, speed) : 0;
     rush += (rushTarget - rush) * Math.min(1, dt * 8);
     manager.setRush(rush < 0.002 ? 0 : rush);
     hud?.update(dt, manager, renderer);
   });
 
   // Exposed for manual inspection in dev tools only.
-  if (import.meta.env.DEV) window.__inward = { manager, director, renderer, audio, storyline, hotspots };
+  if (import.meta.env.DEV) window.__inward = { manager, director, renderer, audio, storyline, hotspots, quality };
 }
 
 boot();

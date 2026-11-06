@@ -3,6 +3,7 @@ import { BaseScene } from '../BaseScene.js';
 import { organicMaterial, tissueMaterial } from '../shared/materials.js';
 import { createTaperedTube, distanceToPoints } from '../shared/geometry.js';
 import { createParticles } from '../shared/particles.js';
+import { InstanceCuller } from '../shared/instanceCulling.js';
 import { ENDOTHELIUM } from '../shared/palette.js';
 import organelleVertex from '../../shaders/organelle.vert.glsl?raw';
 import sheetFragment from './sheet.frag.glsl?raw';
@@ -31,6 +32,8 @@ const APPROACH_GAP = 0.5;
 const END_GAP = 0.05;
 /** Radius of the clear shaft the camera descends through. */
 const SHAFT = 0.8;
+/** Collagen bundles further than this use the lighter tube from the quality preset. */
+const COLLAGEN_LOD_DISTANCE = 10;
 
 /** Fog/background by depth: pale near the surface, deep red by the vessel. */
 const FOG_STOPS = [
@@ -219,7 +222,9 @@ export class DermisScene extends BaseScene {
         return new THREE.Vector3(x, 0.35 * Math.sin(x * 1.3), 0.25 * Math.cos(x * 0.9));
       }),
     );
-    const geometry = createTaperedTube(template, { tubularSegments: 96, radius: 0.42, radialSegments: 7, taperLength: 1.6, fadeLength: 2.2 });
+    const [nearSegments, farSegments] = this.quality.dermis.collagenSegments;
+    const tube = (tubularSegments) => createTaperedTube(template, { tubularSegments, radius: 0.42, radialSegments: 7, taperLength: 1.6, fadeLength: 2.2 });
+    const geometry = tube(nearSegments);
     const material = this.animate(tissueMaterial({ color: '#e2bfae', rimColor: '#fff2ea', wobble: 0.04, wobbleScale: 0.6, fade: true }));
     const checkpoints = template.getSpacedPoints(10);
 
@@ -241,7 +246,8 @@ export class DermisScene extends BaseScene {
       });
       if (clear) matrices.push(matrix);
     }
-    this.#addInstanced(geometry, material, matrices);
+    // Bundles beyond COLLAGEN_LOD_DISTANCE (small, hazy) use a lighter tube.
+    this.#addInstanced(geometry, material, matrices, { lod: tube(farSegments), lodDistance: COLLAGEN_LOD_DISTANCE });
   }
 
   /** Thin, faint elastic fibres. */
@@ -382,13 +388,12 @@ export class DermisScene extends BaseScene {
     this.scene.add(particles);
   }
 
-  #addInstanced(geometry, material, matrices) {
+  #addInstanced(geometry, material, matrices, { lod = null, lodDistance = Infinity } = {}) {
     const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, matrices.length));
-    matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
-    mesh.count = matrices.length;
-    mesh.instanceMatrix.needsUpdate = true;
-    mesh.computeBoundingSphere();
+    const far = lod ? new THREE.InstancedMesh(lod, material, Math.max(1, matrices.length)) : null;
+    this.addCuller(new InstanceCuller(mesh, matrices, { lod: far, lodDistance }));
     this.scene.add(mesh);
+    if (far) this.scene.add(far);
     return mesh;
   }
 

@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "facts": "node scripts/export-facts.mjs"
   },
   "dependencies": {
     "gsap": "^3.15.1",

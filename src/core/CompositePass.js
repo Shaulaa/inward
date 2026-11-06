@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import noise from '../shaders/noise.glsl?raw';
 import fragmentShader from '../shaders/composite.frag.glsl?raw';
 
-const MODES = { crossfade: 0, membrane: 1 };
+const MODES = { crossfade: 0, membrane: 1, montage: 2 };
 
 /** Full-screen pass that blends two scene render targets and outputs to the canvas. */
 export class CompositePass {
@@ -17,6 +17,8 @@ export class CompositePass {
         uTime: { value: 0 },
         uAspect: { value: 1 },
         uRimColor: { value: new THREE.Color('#ff9a8c') },
+        uZoomA: { value: 1 },
+        uZoomB: { value: 1 },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -40,11 +42,11 @@ export class CompositePass {
 
   /**
    * @param {THREE.WebGLRenderer} renderer
-   * @param {{ a: THREE.Texture, b?: THREE.Texture | null, mix?: number, mode?: string, time: number, aspect: number, rimColor?: THREE.Color, target?: THREE.WebGLRenderTarget | null }} input
+   * @param {{ a: THREE.Texture, b?: THREE.Texture | null, mix?: number, mode?: string, time: number, aspect: number, rimColor?: THREE.Color, target?: THREE.WebGLRenderTarget | null, zoomA?: number, zoomB?: number }} input
    *   target: where to draw. A render target receives linear HDR (tone mapping
    *   and output colour space only apply when drawing to the canvas).
    */
-  render(renderer, { a, b = null, mix = 0, mode = 'crossfade', time, aspect, rimColor, target = null }) {
+  render(renderer, { a, b = null, mix = 0, mode = 'crossfade', time, aspect, rimColor, target = null, zoomA = 1, zoomB = 1 }) {
     const u = this.material.uniforms;
     u.tA.value = a;
     u.tB.value = b ?? a;
@@ -52,6 +54,8 @@ export class CompositePass {
     u.uMode.value = MODES[mode] ?? 0;
     u.uTime.value = time;
     u.uAspect.value = aspect;
+    u.uZoomA.value = zoomA;
+    u.uZoomB.value = zoomB;
     if (rimColor) u.uRimColor.value.copy(rimColor);
 
     renderer.setRenderTarget(target);

@@ -8,6 +8,7 @@ uniform vec3 uColorInner;
 uniform vec3 uColorProtein;      // outside: matches the vessel wall
 uniform vec3 uColorProteinInner; // inside: the cell's own palette (no red carry-over)
 uniform vec3 uColorRim;
+uniform float uSphereRadius; // the membrane is a sphere around the origin
 
 varying vec3 vWorldPos;
 varying vec3 vNormalW;
@@ -19,6 +20,14 @@ void main() {
   vec3 N = normalize(vNormalW) * (outside ? 1.0 : -1.0);
   vec3 toCamera = cameraPosition - vWorldPos;
   float dist = length(toCamera);
+  // three.js draws a transparent double-sided mesh in two passes, back faces
+  // first. While the camera is still outside, the back faces are the far
+  // inner wall of the sphere, tens of units away and fully fogged: shading
+  // them full-screen doubled this shader's cost for pixels that end up pure
+  // fog colour (the background is the fog colour too). Skip them; back faces
+  // close to the lens (the walls of the opening it dives through) still draw.
+  // Before any derivative below, and uniform across each pass.
+  if (length(cameraPosition) > uSphereRadius && !outside && dist > 6.0) discard;
   vec3 V = toCamera / dist;
   float ndv = clamp(dot(N, V), 0.0, 1.0);
   float fres = pow(1.0 - ndv, 2.5);

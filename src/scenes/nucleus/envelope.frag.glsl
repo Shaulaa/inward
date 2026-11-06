@@ -13,6 +13,7 @@ uniform vec3 uColorPoreRing;
 uniform vec3 uColorPoreCenter;
 uniform vec3 uColorRim;
 uniform vec3 uColorInner;
+uniform float uSphereRadius; // the envelope is a sphere around the origin
 
 varying vec3 vObjPos;
 varying vec3 vWorldPos;
@@ -25,6 +26,14 @@ void main() {
   vec3 N = normalize(vNormalW) * (outside ? 1.0 : -1.0);
   vec3 toCamera = cameraPosition - vWorldPos;
   float dist = length(toCamera);
+  // three.js draws a transparent double-sided mesh in two passes, back faces
+  // first. While the camera is still outside, the back faces are the far
+  // inner wall of the sphere, tens of units away and fully fogged: shading
+  // them full-screen doubled this shader's cost for pixels that end up pure
+  // fog colour (the background is the fog colour too). Skip them; back faces
+  // close to the lens (the walls of the opening it dives through) still draw.
+  // Before any derivative below, and uniform across each pass.
+  if (length(cameraPosition) > uSphereRadius && !outside && dist > 6.0) discard;
   vec3 V = toCamera / dist;
 
   float height;

@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { BaseScene } from '../BaseScene.js';
 import { organicMaterial, tissueMaterial } from '../shared/materials.js';
-import { createTaperedTube } from '../shared/geometry.js';
+import { createTaperedTube, splitGrid } from '../shared/geometry.js';
+import { InstanceCuller } from '../shared/instanceCulling.js';
 import { createSkinField } from './skinField.js';
 import skinVertex from './skin.vert.glsl?raw';
 import skinFragment from './skin.frag.glsl?raw';
@@ -19,6 +20,8 @@ const FOG_DENSITY = 0.018;
 const LIGHT_DIR = new THREE.Vector3(-0.45, 0.8, 0.4).normalize();
 const VERTICAL_FOV = 55;
 const MAX_HORIZONTAL_FOV = 80;
+/** The surface is drawn as SURFACE_TILES² tiles, so up close only the few under the lens are drawn. */
+const SURFACE_TILES = 8;
 
 /** Lens height above the skin when the dive hands over to the slow press, and at the very end. */
 const APPROACH_HEIGHT = 0.45;
@@ -117,7 +120,8 @@ export class SkinSurfaceScene extends BaseScene {
         },
       }),
     );
-    this.scene.add(new THREE.Mesh(geometry, material));
+    for (const tile of splitGrid(geometry, surfaceSegments, SURFACE_TILES)) this.scene.add(new THREE.Mesh(tile, material));
+    geometry.dispose();
   }
 
   /** Fine hairs growing out of some pores, all from one instanced, tapered template. */
@@ -142,7 +146,8 @@ export class SkinSurfaceScene extends BaseScene {
       const j = Math.floor(rng.next() * (i + 1));
       [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
     }
-    const mesh = new THREE.InstancedMesh(geometry, material, Math.min(count, candidates.length));
+    const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, Math.min(count, candidates.length)));
+    const matrices = [];
     const hairAnchors = [];
     const alongHair = template.getPointAt(0.35);
     const quaternion = new THREE.Quaternion();
@@ -150,19 +155,19 @@ export class SkinSurfaceScene extends BaseScene {
     const position = new THREE.Vector3();
     const scale = new THREE.Vector3();
     const matrix = new THREE.Matrix4();
-    for (let i = 0; i < mesh.count; i++) {
+    for (let i = 0; i < Math.min(count, candidates.length); i++) {
       const pore = candidates[i];
       position.set(pore.x, this.field.sample(pore.x, pore.z).height, pore.z);
       // Hairs lean roughly the same way, like a real hair stream.
       euler.set(rng.range(-0.12, 0.12), rng.range(0.3, 1.2), rng.range(-0.15, 0.1));
       quaternion.setFromEuler(euler);
       scale.setScalar(rng.range(0.6, 1.3));
-      mesh.setMatrixAt(i, matrix.compose(position, quaternion, scale));
+      matrices.push(matrix.compose(position, quaternion, scale).clone());
       hairAnchors.push(alongHair.clone().applyMatrix4(matrix));
     }
     this.addAnchor('hair', hairAnchors, { near: 0.6, far: 16 });
-    mesh.instanceMatrix.needsUpdate = true;
-    mesh.computeBoundingSphere();
+    // Only the hairs in view are drawn (none while the lens presses into the skin).
+    this.addCuller(new InstanceCuller(mesh, matrices));
     this.scene.add(mesh);
   }
 

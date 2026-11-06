@@ -8,6 +8,8 @@ import { createParticles } from '../shared/particles.js';
 import { B_DNA, buildHelix, randomSequence } from './dnaGeometry.js';
 import { createDnaFlight } from './dnaFlight.js';
 import { createHelixRibbon } from './dnaRibbon.js';
+import { fogLimit, mergeByCell, sliceRings } from '../shared/geometry.js';
+import { InstanceCuller } from '../shared/instanceCulling.js';
 import { createRng } from '../../utils/random.js';
 import { smoothstep } from '../../utils/math.js';
 
@@ -23,6 +25,16 @@ const RIBBON_RIM = '#c79be0';
 const RIBBON_WIDTH = 0.5;
 const RIBBON_THICKNESS = 0.16;
 const BASE_RADIUS = 0.13;
+/** Ribbon chunk length (base pairs) for culling, and the grid cell (nm) chunks are merged by. */
+const PAIRS_PER_CHUNK = 15;
+const CHUNK_CELL = 8;
+/** Ribbon chunks further than this from the camera's path keep every second ring. */
+const RIBBON_FAR = 16;
+/** Base rods: lighter model beyond ROD_LOD_DISTANCE; none beyond the fog (≥97 % fogged at FOG_DENSITY). */
+const ROD_LOD_DISTANCE = 9;
+const FOG_LIMIT = 55;
+/** The camera's path runs along the hero axis between these z (see dnaFlight). */
+const CAMERA_PATH_Z = [-17.5, 0.5];
 
 /**
  * The hero helix runs from far behind the camera to far ahead, so neither end
@@ -52,7 +64,8 @@ export class DnaScene extends BaseScene {
     this.scene.fog = new THREE.FogExp2(FOG_COLOR, FOG_DENSITY);
 
     this.camera.near = 0.01;
-    this.camera.far = 120;
+    // Past this the haze is complete: the far ends of the helices are culled, not just fogged.
+    this.camera.far = fogLimit(FOG_DENSITY);
     this.camera.fov = 58;
     this.camera.updateProjectionMatrix();
     this.scene.add(this.camera);
@@ -80,7 +93,8 @@ export class DnaScene extends BaseScene {
   }
 
   #buildHelices(rng, helices) {
-    const backbones = [];
+    const q = this.quality.dna;
+    const ribbonChunks = [];
     const bases = { hero: [], background: [] };
     const quaternion = new THREE.Quaternion();
     const yAxis = new THREE.Vector3(0, 1, 0);
@@ -89,24 +103,28 @@ export class DnaScene extends BaseScene {
     const unit = new THREE.Vector3(1, 1, 1);
     let rodLength = 0;
     const anchors = { basePair: [], backbone: [], genome: [] };
+    const fromPath = (p) => Math.hypot(p.x, p.y, p.z - THREE.MathUtils.clamp(p.z, CAMERA_PATH_Z[0], CAMERA_PATH_Z[1]));
 
     for (const h of helices) {
       const helix = buildHelix(randomSequence(rng, h.length));
       const place = new THREE.Matrix4().compose(h.position, new THREE.Quaternion().setFromEuler(h.rotation), unit);
 
-      // One seamless ribbon per backbone, built in the helix's own space
-      // (so "outward" is away from its axis), then placed.
+      // One seamless ribbon per backbone, built in the helix's own space (so
+      // "outward" is away from its axis), placed, then cut into short chunks
+      // so the parts out of view are culled. Chunks far from the camera's
+      // path keep every second ring (they are small and hazy there).
+      const [samplesPerPoint, radialSegments] = h.hero ? q.ribbonHero : q.ribbonBackground;
       for (const strand of [helix.strandA, helix.strandB]) {
-        const ribbon = createHelixRibbon(strand, {
-          width: RIBBON_WIDTH,
-          thickness: RIBBON_THICKNESS,
-          samplesPerPoint: h.hero ? 6 : 3,
-          radialSegments: h.hero ? 18 : 10,
-          taperLength: 4,
-          fadeLength: 9,
-        });
+        const ribbon = createHelixRibbon(strand, { width: RIBBON_WIDTH, thickness: RIBBON_THICKNESS, samplesPerPoint, radialSegments, taperLength: 4, fadeLength: 9 });
         ribbon.applyMatrix4(place);
-        backbones.push(ribbon);
+        ribbonChunks.push(
+          ...sliceRings(ribbon, {
+            ringSize: radialSegments + 1,
+            ringsPerChunk: samplesPerPoint * PAIRS_PER_CHUNK,
+            step: (_, c) => (fromPath(c) > RIBBON_FAR ? 2 : 1),
+          }),
+        );
+        ribbon.dispose();
       }
 
       helix.pairs.forEach((pair, i) => {
@@ -134,13 +152,10 @@ export class DnaScene extends BaseScene {
         }
       });
     }
-
     this.addAnchor('basePair', anchors.basePair, { near: 1.2, far: 9 });
     this.addAnchor('backbone', anchors.backbone, { near: 1.2, far: 9 });
     this.addAnchor('genome', anchors.genome, { near: 6, far: 40 });
 
-    const backboneGeometry = mergeGeometries(backbones);
-    backbones.forEach((g) => g.dispose());
     // The ribbon's broad side faces the camera, so it catches every light at
     // once: a deeper base colour and a softer rim keep it lilac, not white.
     const ribbonMaterial = this.animate(
@@ -159,25 +174,35 @@ export class DnaScene extends BaseScene {
         transparent: true,
       }),
     );
-    this.scene.add(new THREE.Mesh(backboneGeometry, ribbonMaterial));
+    for (const geometry of mergeByCell(ribbonChunks, CHUNK_CELL, mergeGeometries)) {
+      this.scene.add(new THREE.Mesh(geometry, ribbonMaterial));
+    }
 
     // Every half-rod has the same length, so one capsule (rounded ends, no flat
     // cut) fits all of them without non-uniform scaling. Instance colours need a
-    // built-in material; MeshPhysicalMaterial gives them a soft sheen.
+    // built-in material; MeshPhysicalMaterial gives them a soft sheen. Only the
+    // rods in view are drawn; the hero's distant ones use a lighter capsule.
     const baseMaterial = new THREE.MeshPhysicalMaterial({ roughness: 0.38, metalness: 0, clearcoat: 0.35, clearcoatRoughness: 0.4, emissive: '#1a1030' });
     const shaft = Math.max(0.01, rodLength - BASE_RADIUS * 2);
-    for (const [key, capSegments, radialSegments] of [['hero', 8, 20], ['background', 3, 8]]) {
+    const capsule = ([capSegments, radialSegments], count) => {
+      const mesh = new THREE.InstancedMesh(new THREE.CapsuleGeometry(BASE_RADIUS, shaft, capSegments, radialSegments), baseMaterial, Math.max(1, count));
+      this.scene.add(mesh);
+      return mesh;
+    };
+    for (const key of ['hero', 'background']) {
       const list = bases[key];
       if (!list.length) continue;
-      const mesh = new THREE.InstancedMesh(new THREE.CapsuleGeometry(BASE_RADIUS, shaft, capSegments, radialSegments), baseMaterial, list.length);
-      list.forEach((b, i) => {
-        mesh.setMatrixAt(i, b.matrix);
-        mesh.setColorAt(i, b.color);
-      });
-      mesh.instanceMatrix.needsUpdate = true;
-      mesh.instanceColor.needsUpdate = true;
-      mesh.computeBoundingSphere();
-      this.scene.add(mesh);
+      const hero = key === 'hero';
+      const near = capsule(hero ? q.rodsHero : q.rodsBackground, list.length);
+      const far = hero ? capsule(q.rodsHeroFar, list.length) : null;
+      this.addCuller(
+        new InstanceCuller(near, list.map((b) => b.matrix), {
+          lod: far,
+          lodDistance: ROD_LOD_DISTANCE,
+          maxDistance: FOG_LIMIT,
+          colors: list.map((b) => b.color),
+        }),
+      );
     }
   }
 

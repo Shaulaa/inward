@@ -10,7 +10,8 @@ export function createSkinField(rng, { size = 44, spacing = 1.5, jitter = 0.42, 
   const half = size / 2;
   const pores = [];
   const buckets = new Map();
-  const key = (i, j) => `${i},${j}`;
+  // Numeric cell key: the height field is sampled ~200k times per build, string keys made that slow.
+  const key = (i, j) => (i + 32768) * 65536 + (j + 32768);
 
   const count = Math.floor(size / spacing);
   for (let i = 0; i < count; i++) {

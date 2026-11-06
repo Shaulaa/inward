@@ -4,6 +4,7 @@ import { VesselPath } from './VesselPath.js';
 import { createRedCellGeometry } from './rbcGeometry.js';
 import { createLanes, distributeAlongLane } from './redCellLanes.js';
 import { createParticles } from '../shared/particles.js';
+import { fogLimit } from '../shared/geometry.js';
 import { ENDOTHELIUM, ENDOTHELIUM_HIGHLIGHT } from '../shared/palette.js';
 import noise from '../../shaders/noise.glsl?raw';
 import bump from '../../shaders/bump.glsl?raw';
@@ -58,6 +59,18 @@ const APPROACH_GAP = 0.4;
 const LANE_R_MIN = 0.7;
 const LANE_R_MAX = VESSEL_RADIUS * 0.75;
 const LANE_SPACING = RED_CELL_RADIUS * 2 + 0.08;
+/**
+ * Red cells are only drawn within this distance of the lens: past it they
+ * are ≥97 % fog (FogExp2 at FOG_DENSITY), and the vessel holds ~1500 of them
+ * along its whole length. Within NEAR_DETAIL_DISTANCE they use the detailed
+ * model, further out a lighter one (the silhouette is a few dozen pixels).
+ */
+const DRAW_DISTANCE = 26;
+/** Distance from the wall within which wall.frag shows its close-up membrane detail (its `closeUp` ramp ends here). */
+const CLOSE_UP_RANGE = 2.5;
+const NEAR_DETAIL_DISTANCE = 5;
+/** Click points ride on cells in the outermost lanes: the slowest (Poiseuille flow), so the easiest to follow. */
+const ANCHOR_LANE_SHARE = 0.85;
 const ALONG_LANE_GAP = RED_CELL_RADIUS * 2 + 0.31;
 
 export class VesselScene extends BaseScene {
@@ -75,7 +88,8 @@ export class VesselScene extends BaseScene {
     this.scene.fog = new THREE.FogExp2(FOG_COLOR, FOG_DENSITY);
 
     this.camera.near = 0.01;
-    this.camera.far = 70;
+    // Past this the blood haze is complete.
+    this.camera.far = fogLimit(FOG_DENSITY);
     this.camera.fov = 62;
     this.camera.updateProjectionMatrix();
 
@@ -91,7 +105,6 @@ export class VesselScene extends BaseScene {
     this.#buildWall(curve, q);
     this.#buildRedCells(rng, q.redCells);
     this.#buildPlasma(rng, q.plasmaParticles);
-    this.cameraS = 0;
     this.#buildAnchors();
 
     this.tmp = {
@@ -132,6 +145,8 @@ export class VesselScene extends BaseScene {
           uBulge: { value: BULGE },
           uBulgeRadius: { value: 0.75 },
           uFocus: { value: 0 },
+          // 1 while the lens is close enough to the wall for its close-up detail to show (see #updateCamera).
+          uDetail: { value: 0 },
           uLength: { value: this.path.length },
           uCircumference: { value: Math.PI * 2 * VESSEL_RADIUS },
           uColorWall: { value: new THREE.Color(ENDOTHELIUM) },
@@ -191,12 +206,28 @@ export class VesselScene extends BaseScene {
       side: THREE.DoubleSide,
       fog: true,
     });
-    const geometry = createRedCellGeometry({ radius: RED_CELL_RADIUS });
-    this.redCells = new THREE.InstancedMesh(geometry, material, this.cellState.length);
-    this.redCells.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    // Instances move along the whole vessel; the geometry's own bounds are meaningless.
-    this.redCells.frustumCulled = false;
-    this.scene.add(this.redCells);
+    // Two levels of detail, both refilled every frame with only the cells in view.
+    const lod = (geometry) => {
+      const mesh = new THREE.InstancedMesh(geometry, material, this.cellState.length);
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.count = 0;
+      // Culled per cell in #updateFlow; the mesh's own bounds would be meaningless.
+      mesh.frustumCulled = false;
+      this.scene.add(mesh);
+      return mesh;
+    };
+    this.redCellsNear = lod(createRedCellGeometry({ radius: RED_CELL_RADIUS }));
+    this.redCellsFar = lod(createRedCellGeometry({ radius: RED_CELL_RADIUS, profileSegments: 5, radialSegments: 16 }));
+    this.frustum = new THREE.Frustum();
+    this.viewProjection = new THREE.Matrix4();
+    this.cellSphere = new THREE.Sphere(new THREE.Vector3(), RED_CELL_RADIUS);
+
+    // Click-point candidates: cells in the slowest lanes; positions follow the cells each frame.
+    const slowest = LANE_R_MAX * ANCHOR_LANE_SHARE;
+    this.anchorCells = this.cellState.filter((cell) => cell.lane.radial >= slowest);
+    this.anchorCells.forEach((cell) => {
+      cell.anchor = new THREE.Vector3();
+    });
   }
 
   #buildPlasma(rng, count) {
@@ -223,23 +254,22 @@ export class VesselScene extends BaseScene {
   }
 
   /**
-   * Click points ride along with the camera (the cells themselves stream past
-   * too fast to click): fixed slots a few units ahead of the lens — among the
-   * red cells, on the wall, and in the plasma between the lanes.
+   * Click points on real, steady objects: red cells in the slowest lanes
+   * (each marker stays on its cell as it drifts down the vessel), and fixed
+   * spots on the wall along the stretch the camera rides through.
    */
   #buildAnchors() {
-    const slots = (distances, radial, count) =>
-      distances.flatMap((d) => Array.from({ length: count }, (_, k) => ({ d, radial, angle: (k / count) * Math.PI * 2 + d })));
-    const track = (spec) => {
-      const points = spec.map(() => new THREE.Vector3());
-      return () => {
-        spec.forEach((slot, i) => this.path.sample(Math.min(1, this.cameraS + slot.d / this.path.length), slot.radial, slot.angle, points[i]));
-        return points;
-      };
-    };
-    this.addAnchor('redCells', track(slots([4, 5.5], 1.5, 8)), { near: 1, far: 12 });
-    this.addAnchor('wall', track(slots([6, 8], VESSEL_RADIUS * 0.96, 8)), { near: 1, far: 14 });
-    this.addAnchor('plasma', track(slots([7.5, 9.5], 2.3, 8)), { near: 1, far: 14 });
+    const cellPositions = this.anchorCells.map((cell) => cell.anchor);
+    this.addAnchor('redCells', cellPositions, { near: 1.2, far: 10 });
+
+    const wall = [];
+    const stopS = TARGET_S - CAMERA_STOP_BEFORE_TARGET / this.path.length;
+    const startS = Math.max(0.02, stopS - RIDE_LENGTH / this.path.length);
+    for (let d = 0; d <= RIDE_LENGTH + 12; d += 2) {
+      const s = Math.min(1, startS + d / this.path.length);
+      for (let k = 0; k < 8; k++) wall.push(this.path.sample(s, VESSEL_RADIUS * 0.97, (k / 8) * Math.PI * 2 + d * 0.37));
+    }
+    this.addAnchor('wall', wall, { near: 1.5, far: 13 });
   }
 
   update({ progress, exit, duration, time }) {
@@ -247,35 +277,57 @@ export class VesselScene extends BaseScene {
     const dt = this.lastTime === null ? 0 : Math.min(time - this.lastTime, 0.1);
     this.lastTime = time;
 
-    const beat = heartbeat(time);
+    // Reduced motion: a steady flow, no pulsing.
+    const beat = this.quality.reducedMotion ? 0 : heartbeat(time);
     const flow = (0.45 + 0.9 * beat) * dt / this.path.length;
 
     this.wallMaterial.uniforms.uTime.value = time;
     this.wallMaterial.uniforms.uBeat.value = beat;
     this.plasma.material.uniforms.uTime.value = time;
 
-    this.#updateFlow(flow, time);
+    // Camera first: the flow culls and sizes cells against this frame's view.
     this.#updateCamera(progress, exit, duration);
+    this.#updateFlow(flow, time);
   }
 
   #updateFlow(flow, time) {
     const { position, quat, spin, scale, matrix } = this.tmp;
-    // Uses last frame's camera: one frame of lag is invisible, and cells that
-    // would slice through the near plane shrink away instead.
-    const lens = this.camera.position;
+    const camera = this.camera;
+    const lens = camera.position;
+    camera.updateMatrixWorld();
+    this.viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.viewProjection);
+    const sphere = this.cellSphere;
+    const drawSq = DRAW_DISTANCE * DRAW_DISTANCE;
+    const nearSq = NEAR_DETAIL_DISTANCE * NEAR_DETAIL_DISTANCE;
+    let near = 0;
+    let far = 0;
 
     for (const lane of this.lanes) lane.offset = (lane.offset + lane.speed * flow) % 1;
 
-    this.cellState.forEach((cell, i) => {
+    for (const cell of this.cellState) {
       const { lane } = cell;
       this.path.sample((cell.s + lane.offset) % 1, lane.radial, lane.angle, position);
-      scale.setScalar(Math.max(smoothstep(0.2, 0.9, position.distanceTo(lens)), 1e-3));
+      cell.anchor?.copy(position);
+      const distanceSq = position.distanceToSquared(lens);
+      if (distanceSq > drawSq) continue;
+      sphere.center.copy(position);
+      if (!this.frustum.intersectsSphere(sphere)) continue;
+
+      // Cells that would slice through the near plane shrink away instead.
+      scale.setScalar(Math.max(smoothstep(0.2, 0.9, Math.sqrt(distanceSq)), 1e-3));
       spin.setFromAxisAngle(cell.spinAxis, time * cell.spinSpeed);
       quat.multiplyQuaternions(cell.base, spin);
       matrix.compose(position, quat, scale);
-      this.redCells.setMatrixAt(i, matrix);
-    });
-    this.redCells.instanceMatrix.needsUpdate = true;
+      if (distanceSq < nearSq) this.redCellsNear.setMatrixAt(near++, matrix);
+      else this.redCellsFar.setMatrixAt(far++, matrix);
+    }
+    for (const [mesh, count] of [[this.redCellsNear, near], [this.redCellsFar, far]]) {
+      mesh.count = count;
+      mesh.instanceMatrix.clearUpdateRanges();
+      mesh.instanceMatrix.addUpdateRange(0, Math.max(count, 1) * 16);
+      mesh.instanceMatrix.needsUpdate = true;
+    }
 
     const positions = this.plasma.geometry.attributes.position;
     this.plasmaState.forEach((speck, i) => {
@@ -302,7 +354,6 @@ export class VesselScene extends BaseScene {
     const stopS = TARGET_S - CAMERA_STOP_BEFORE_TARGET / this.path.length;
     const startS = Math.max(0.02, stopS - RIDE_LENGTH / this.path.length);
     const s = lerp(startS, stopS, Math.min(progress / overlapStart, 1));
-    this.cameraS = s;
     this.path.pointAt(s, center);
     this.path.pointAt(Math.min(s + LOOK_AHEAD / this.path.length, 1), ahead);
 
@@ -311,6 +362,10 @@ export class VesselScene extends BaseScene {
 
     this.camera.position.copy(position);
     this.camera.lookAt(look);
+    // The wall's close-up detail fades in within CLOSE_UP_RANGE of the lens;
+    // while the whole wall is further away, skip computing it at all.
+    const wallGap = VESSEL_RADIUS - position.distanceTo(center);
+    this.wallMaterial.uniforms.uDetail.value = wallGap < CLOSE_UP_RANGE + 0.3 ? 1 : 0;
     this.wallMaterial.uniforms.uFocus.value = smoothstep(diveStart - 0.15, diveStart + 0.1, progress);
   }
 

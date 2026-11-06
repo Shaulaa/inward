@@ -1,9 +1,10 @@
 /**
  * Semua teks yang tampil di Inward ada di file ini: nama scene dan skalanya,
  * teks tiap scene, fakta titik klik, penutup, dan catatan ilustrasi.
- * (Pengecualian: teks statis di index.html — nama brand, petunjuk scroll,
- * pesan noscript — dan label tombol suara di SoundToggle.js, yang memang
- * tidak diubah.)
+ * (Pengecualian: teks statis di index.html — judul halaman, meta description,
+ * Open Graph/Twitter, nama brand, petunjuk scroll, pesan noscript — karena
+ * crawler dan browser tanpa JavaScript membacanya langsung dari HTML; dan
+ * label tombol suara di SoundToggle.js.)
  *
  * Penanda cek fakta (`check`):
  *   level 'wajib'      angka atau perkiraan. Wajib dicocokkan ke sumber
@@ -125,13 +126,6 @@ export const SCENES = {
         text: 'Bagian dalam pembuluh dilapisi selapis sel tipis bernama endotel. Endotel ikut mengatur kapan pembuluh melebar atau menyempit, dan menjaga darah tidak menggumpal.',
         check: { level: 'disarankan', what: 'Fungsi endotel', source: REF.guyton },
       },
-      {
-        id: 'plasma',
-        label: 'Plasma',
-        title: 'Plasma darah',
-        text: 'Lebih dari separuh volume darah adalah plasma, cairan kekuningan yang sekitar 90% air. Plasma membawa nutrisi, hormon, dan sisa metabolisme.',
-        check: { level: 'wajib', what: 'Plasma ±55% volume darah, ±90% air', source: REF.guyton },
-      },
     ],
   },
 
@@ -231,8 +225,8 @@ export const SCENES = {
         id: 'genome',
         label: 'Untai lain',
         title: 'Genom manusia',
-        text: 'Satu set kromosom manusia berisi sekitar 3,1 miliar pasang basa, dan tiap sel punya dua set.',
-        check: { level: 'wajib', what: '±3,1 miliar pasang basa per set (GRCh38)', source: 'Genome Reference Consortium, GRCh38' },
+        text: 'Satu set kromosom manusia berisi sekitar 3,1 miliar pasang basa, dan kebanyakan sel tubuh punya dua set.',
+        check: { level: 'wajib', what: '±3,1 miliar pasang basa per set (GRCh38); "kebanyakan sel" (sel telur/sperma satu set, sel darah merah tanpa inti)', source: 'Genome Reference Consortium, GRCh38' },
       },
     ],
   },
@@ -258,4 +252,22 @@ export const OUTRO = {
 export const UI = {
   hotspotPrefix: 'Fakta:',
   closeFact: 'Tutup fakta',
+};
+
+/** Kalau tampilan 3D tidak bisa jalan (lihat src/ui/Fallback.js). */
+export const FALLBACK = {
+  unsupported: {
+    title: 'Perjalanan 3D-nya belum bisa tampil di sini',
+    text: 'Browser atau perangkat ini belum mendukung WebGL 2, teknologi grafis yang dipakai Inward. Coba buka di versi terbaru Chrome, Edge, Firefox, atau Safari. Sementara itu, ini perjalanannya dalam bentuk teks.',
+  },
+  failed: {
+    title: 'Tampilan 3D gagal dimulai',
+    text: 'WebGL tersedia, tapi gagal dijalankan di perangkat ini (biasanya karena driver grafis atau akselerasi hardware dimatikan). Ini perjalanannya dalam bentuk teks.',
+  },
+  contextLost: {
+    title: 'Tampilan 3D berhenti',
+    text: 'Perangkat grafis di-reset atau kehabisan memori. Muat ulang halaman untuk melanjutkan.',
+  },
+  reload: 'Muat ulang',
+  journeyHeading: 'Perjalanannya, dalam teks',
 };

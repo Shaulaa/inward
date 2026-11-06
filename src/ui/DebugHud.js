@@ -25,7 +25,7 @@ export class DebugHud {
     const { state } = manager;
     const scenes = this.journey.scenes;
     const name = (i) => (i === null ? '-' : `${scenes[i].id}`);
-    const local = (i) => (i === null ? '' : ` ${(state.local[i] * 100).toFixed(1)}%`);
+    const local = (i) => (i === null || state.local[i] === undefined ? '' : ` ${(state.local[i] * 100).toFixed(1)}%`);
 
     this.element.textContent = [
       `fps        ${this.fps}`,
@@ -36,6 +36,8 @@ export class DebugHud {
       `mix        ${state.mix.toFixed(3)} ${state.transition?.type ?? ''}`,
       `active     ${name(state.active)} (${scenes[state.active].scale})`,
       `live       ${manager.liveIds.join(', ')}`,
+      `snapshots  ${manager.snapshotIds.join(', ') || '-'}`,
+      `quality    ${manager.quality.tier}${manager.quality.reducedMotion ? ' (reduced motion)' : ''}`,
       `draw calls ${renderer.info.render.calls}`,
       `triangles  ${renderer.info.render.triangles.toLocaleString()}`,
     ].join('\n');

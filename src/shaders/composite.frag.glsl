@@ -3,6 +3,9 @@
 // output color space once for the whole frame.
 //
 // uMode 0: crossfade
+// uMode 2: montage (the closing rewind) — B is drawn over A at its own zoom,
+//          weighted by uMix; once B is smaller than the screen its edge
+//          softens into A, so a shrinking image has no hard border.
 // uMode 1: membrane puncture — a hole with an organic, refracting rim opens
 //          from the centre of the screen, as if the camera pushes through the
 //          surface that fills the end of scene A.
@@ -13,17 +16,29 @@ uniform int uMode;
 uniform float uTime;
 uniform float uAspect;
 uniform vec3 uRimColor;
+// Magnification of each image about the screen centre (1 = as rendered); the
+// closing rewind zooms its snapshots out as the camera backs away.
+uniform float uZoomA;
+uniform float uZoomB;
 
 varying vec2 vUv;
+
+vec4 sampleA(vec2 uv) { return texture2D(tA, (uv - 0.5) / uZoomA + 0.5); }
+vec4 sampleB(vec2 uv) { return texture2D(tB, (uv - 0.5) / uZoomB + 0.5); }
 
 void main() {
   vec4 color;
 
   if (uMix <= 0.0) {
-    color = texture2D(tA, vUv);
+    color = sampleA(vUv);
+  } else if (uMode == 2) {
+    vec2 uvB = (vUv - 0.5) / uZoomB + 0.5;
+    float inside = min(min(uvB.x, 1.0 - uvB.x), min(uvB.y, 1.0 - uvB.y));
+    float edge = mix(1.0, smoothstep(0.0, 0.14, inside), smoothstep(1.0, 0.92, uZoomB));
+    color = mix(sampleA(vUv), texture2D(tB, clamp(uvB, 0.0, 1.0)), clamp(uMix * edge, 0.0, 1.0));
   } else if (uMode == 0) {
     float t = smoothstep(0.0, 1.0, uMix);
-    color = mix(texture2D(tA, vUv), texture2D(tB, vUv), t);
+    color = mix(sampleA(vUv), sampleB(vUv), t);
   } else {
     vec2 p = (vUv - 0.5) * vec2(uAspect, 1.0);
     float r = length(p);
@@ -42,8 +57,8 @@ void main() {
 
     // The membrane bends light around the rim: push A outward, pull B inward.
     vec2 warp = dir * rim * 0.035;
-    vec4 a = texture2D(tA, vUv + warp * 0.6);
-    vec4 b = texture2D(tB, vUv - warp);
+    vec4 a = sampleA(vUv + warp * 0.6);
+    vec4 b = sampleB(vUv - warp);
 
     // Before it tears, the surface is stretched thin: brighten A slightly.
     a.rgb *= 1.0 + 0.12 * smoothstep(0.0, 0.25, uMix) * (1.0 - hole);

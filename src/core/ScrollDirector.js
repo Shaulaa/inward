@@ -45,6 +45,12 @@ export class ScrollDirector {
     this.lenis.scrollTo(0, { immediate: true, force: true });
   }
 
+  /** Follow a change of the reader's prefers-reduced-motion setting: no smoothing or inertia when on. */
+  setReducedMotion(reduced) {
+    this.lenis.options.lerp = reduced ? 1 : 0.075;
+    this.lenis.options.smoothWheel = !reduced;
+  }
+
   refresh() {
     ScrollTrigger.refresh();
   }

@@ -275,19 +275,32 @@ body::-webkit-scrollbar {
   border: 0;
 }
 
-/* "The visuals are an illustration": small, under the brand, inside its scrim. */
+/*
+ * "The visuals are an illustration": small, under the brand. On a dark glass
+ * chip of its own so it stays readable over the bright skin. Fades out after
+ * a few seconds (main.js) and returns at the end.
+ */
 .note {
   position: fixed;
   top: 72px;
-  left: 24px;
+  left: 18px;
   z-index: 2;
-  max-width: 250px;
+  max-width: 262px;
   margin: 0;
+  padding: 6px 9px;
   font-size: 11px;
   line-height: 1.45;
-  color: rgba(244, 233, 230, 0.66);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  color: rgba(244, 233, 230, 0.92);
+  background: rgba(8, 10, 14, 0.6);
+  border-radius: 8px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   pointer-events: none;
+  transition: opacity 1.2s ease;
+}
+
+.note.is-faded {
+  opacity: 0;
 }
 
 /*
@@ -620,24 +633,139 @@ body::-webkit-scrollbar {
   }
 }
 
+/*
+ * When the 3D journey can't run (src/ui/Fallback.js): a readable card with
+ * the explanation and the journey as text; scrolls on its own.
+ */
 .fallback {
   position: fixed;
   inset: 0;
-  display: grid;
-  place-items: center;
-  margin: 0;
-  padding: 24px;
-  text-align: center;
-  font-size: 16px;
-  line-height: 1.5;
-  background: var(--bg);
   z-index: 10;
+  display: grid;
+  justify-items: center;
+  align-items: start;
+  margin: 0;
+  padding: 48px 16px;
+  overflow-y: auto;
+  background: radial-gradient(120% 90% at 50% 0%, #3a0b13 0%, #14060a 60%, #0b0306 100%);
 }
 
 .fallback[hidden] {
   display: none;
 }
 
+/* Context lost: a small notice over the frozen frame, not a full page. */
+.fallback--contextLost {
+  align-items: center;
+  background: rgba(8, 4, 6, 0.72);
+}
+
+.fallback__card {
+  width: min(640px, 100%);
+  padding: 28px 28px 32px;
+  background: rgba(8, 10, 14, 0.5);
+  border: 1px solid rgba(244, 233, 230, 0.14);
+  border-radius: 18px;
+  line-height: 1.55;
+}
+
+.fallback__brand {
+  margin: 0 0 18px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.fallback__title {
+  margin: 0 0 10px;
+  font-size: clamp(22px, 4vw, 28px);
+  line-height: 1.2;
+}
+
+.fallback__text {
+  margin: 0;
+  font-size: 15px;
+  color: rgba(244, 233, 230, 0.86);
+}
+
+.fallback__heading {
+  margin: 30px 0 14px;
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.fallback__journey {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-left: 1px solid rgba(244, 233, 230, 0.2);
+}
+
+.fallback__step {
+  position: relative;
+  padding: 0 0 22px 20px;
+}
+
+.fallback__step::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff8a80;
+}
+
+.fallback__scale {
+  margin: 0 0 2px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: rgba(244, 233, 230, 0.66);
+}
+
+.fallback__step-title {
+  margin: 0 0 4px;
+  font-size: 17px;
+}
+
+.fallback__step-text {
+  margin: 0;
+  font-size: 15px;
+  color: rgba(244, 233, 230, 0.86);
+}
+
+.fallback__note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.fallback__action {
+  margin-top: 18px;
+  padding: 10px 18px;
+  font: 500 13px/1 var(--font);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: rgba(244, 233, 230, 0.1);
+  border: 1px solid rgba(244, 233, 230, 0.4);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.fallback__action:focus-visible {
+  outline: 2px solid #f4e9e6;
+  outline-offset: 3px;
+}
+
+.no-webgl #webgl,
+.no-webgl .brand,
+.no-webgl .sound-toggle,
 .no-webgl .scroll-hint,
 .no-webgl .track {
   display: none;
@@ -670,8 +798,8 @@ body::-webkit-scrollbar {
 
   .note {
     top: 60px;
-    left: 16px;
-    max-width: min(250px, 62vw);
+    left: 10px;
+    max-width: min(262px, 66vw);
   }
 
   /* On small screens only the current scale; the ladder would crowd the frame. */
@@ -701,7 +829,8 @@ body::-webkit-scrollbar {
   .hotspot,
   .hotspot__dot,
   .fact,
-  .caption__action {
+  .caption__action,
+  .note {
     transition: none;
   }
 

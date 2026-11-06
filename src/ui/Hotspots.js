@@ -15,7 +15,7 @@ const KEEP_CLEAR = { x: 0.2, y: 0.24 };
  * minimum distance between markers.
  */
 const STRICT = { near: 1, far: 1, margin: 40, clear: 1, pad: 10, spacing: 64 };
-const LOOSE = { near: 0.8, far: 1.15, margin: 26, clear: 0.85, pad: 2, spacing: 48 };
+const LOOSE = { near: 0.75, far: 1.25, margin: 14, clear: 0.7, pad: 2, spacing: 44 };
 
 /**
  * Click points: a few markers per scene, each pinned to a real object (see
@@ -44,6 +44,11 @@ export class Hotspots {
     this.blockers = blockers;
     this.open = null;
     this.view = new THREE.Vector3();
+    this.previousView = new THREE.Vector3();
+    /** Last frame's view-projection of the active scene's camera, to estimate how fast a candidate moves on screen. */
+    this.viewProjection = new THREE.Matrix4();
+    this.previousViewProjection = new THREE.Matrix4();
+    this.previousScene = null;
 
     this.layer = document.createElement('div');
     this.layer.className = 'hotspots';
@@ -110,6 +115,8 @@ export class Hotspots {
   update({ u, state, time, width, height }) {
     const active = this.#activeScene(u, state);
     const scene = active >= 0 ? this.sceneAt(active) : null;
+    if (scene) this.viewProjection.multiplyMatrices(scene.camera.projectionMatrix, scene.camera.matrixWorldInverse);
+    this.hasMotion = scene !== null && scene === this.previousScene;
     let rects = null;
     const placed = [];
 
@@ -133,6 +140,9 @@ export class Hotspots {
 
     // The card belongs to its scene's window: gone before the transition starts.
     if (this.open && this.open.sceneIndex !== active) this.#close(false);
+
+    this.previousScene = scene;
+    if (scene) this.previousViewProjection.copy(this.viewProjection);
   }
 
   /** Index of the scene whose click points may show now, or -1. */
@@ -157,14 +167,21 @@ export class Hotspots {
     // Let a lost marker fade out before it shows up somewhere else.
     if (frame.time - marker.lostAt < REAPPEAR_DELAY) return null;
 
-    // Prefer an object at a comfortable distance: big enough to read, not filling the lens.
+    // Prefer an object that will stay put: one at a comfortable distance (big
+    // enough to read, not filling the lens), moving slowly across the screen
+    // as the camera travels, and not about to leave the frame.
     const ideal = Math.sqrt(Math.max(anchor.near, 0.05) * anchor.far);
+    const edgeRoom = 0.22 * Math.min(frame.width, frame.height);
     let best = null;
     let bestScore = Infinity;
     anchor.points.forEach((p, i) => {
       const point = this.#project(p, scene.camera, anchor, marker, frame, STRICT);
       if (!point) return;
-      const score = Math.abs(Math.log(point.distance / ideal));
+      const edge = Math.min(point.x, frame.width - point.x, point.y, frame.height - point.y);
+      const score =
+        Math.abs(Math.log(point.distance / ideal)) +
+        0.08 * this.#screenSpeed(p, point, frame) +
+        0.8 * (1 - Math.min(1, edge / edgeRoom));
       if (score < bestScore) {
         bestScore = score;
         best = point;
@@ -172,6 +189,14 @@ export class Hotspots {
       }
     });
     return best;
+  }
+
+  /** How far (px) `world` moved on screen since the last frame, from the camera's motion alone. */
+  #screenSpeed(world, point, { width, height }) {
+    if (!this.hasMotion) return 0;
+    const v = this.previousView.copy(world).applyMatrix4(this.previousViewProjection);
+    if (!Number.isFinite(v.x) || v.z > 1) return 0;
+    return Math.hypot(((v.x + 1) / 2) * width - point.x, ((1 - v.y) / 2) * height - point.y);
   }
 
   /** Screen position of `world` if a marker may sit there, else null. */

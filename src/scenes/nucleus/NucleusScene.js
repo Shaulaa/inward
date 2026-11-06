@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BaseScene } from '../BaseScene.js';
 import { organicMaterial, tissueMaterial } from '../shared/materials.js';
-import { createTaperedTube, distanceToPoints } from '../shared/geometry.js';
+import { buildChunkLods, createTaperedTube, distanceToPoints, fogLimit, mergeByCell, sliceRings, splitByDirection } from '../shared/geometry.js';
+import { InstanceCuller } from '../shared/instanceCulling.js';
 import { createParticles } from '../shared/particles.js';
 import { NUCLEAR_ENVELOPE } from '../shared/palette.js';
 import {
@@ -48,6 +49,27 @@ const HERO_PORE_SIZE = 1.9;
 const DNA_COLOR = '#d68cf0';
 /** Chromatin fibres passing within this distance of the nucleosome string are built smooth. */
 const CHROMATIN_DETAIL_RANGE = 4.5;
+/**
+ * Culling: tubes are cut into chunks (CHUNK_LENGTH units long, merged per
+ * CHUNK_CELL grid cell) so the parts out of view are skipped.
+ */
+const CHUNK_LENGTH = 3;
+const CHUNK_CELL = 14;
+/**
+ * Distance-based detail (per group of chunks, camera to group centre): the fine chromatin fibres show every ring within FINE_LOD, every
+ * second beyond (then they match the regular fibres); the wrapped DNA and the
+ * naked backbones drop to every third ring beyond TUBE_LOD (a few pixels wide
+ * there). Fine groups are smaller (FINE_CELL) so the switch is close to the
+ * camera's real distance.
+ */
+const FINE_LOD = 12;
+const FINE_CELL = 10;
+const TUBE_LOD = 5; // measured to a group's centre; groups are TUBE_CELL wide
+/** Wrapped DNA and backbone chunks are grouped per TUBE_CELL units (fewer draw calls). */
+const TUBE_CELL = 5;
+/** Rungs: lighter capsule beyond RUNG_LOD_DISTANCE, none beyond RUNG_LIMIT (they are 0.008 units thick). */
+const RUNG_LOD_DISTANCE = 0.8;
+const RUNG_LIMIT = 14;
 /** Same base colours as the DNA scene. */
 const BASE_COLORS = { A: '#5ad17a', T: '#ff7a6b', C: '#57a8ff', G: '#ffd257' };
 /**
@@ -86,17 +108,19 @@ export class NucleusScene extends BaseScene {
     this.scene.background = new THREE.Color(FOG_COLOR_ENTRY);
 
     this.camera.near = 0.005;
-    this.camera.far = 90;
+    // The nucleoplasm haze is complete by here (the entry haze is even denser).
+    this.camera.far = fogLimit(FOG_DENSITY_NUCLEUS);
     this.camera.fov = 60;
     this.camera.updateProjectionMatrix();
 
     this.route = createNucleusRoute();
     const { fibers, stringStart, stringEnd } = createChromatinFibers(rng, this.route, { count: q.fibers });
-
-    this.#buildEnvelope();
-    this.#buildChromatin(fibers, stringStart, stringEnd);
+    this.string = createNucleosomeString(stringStart, stringEnd, this.route.bead, STRING_BEFORE_CENTER + BEADS_AFTER_CENTER);
+    // Where the camera goes: the route in, then along the string to the dive.
+    this.#buildEnvelope(q.envelopeDetail);
+    this.#buildChromatin(fibers, stringStart, stringEnd, q);
     this.#buildNucleolus();
-    this.#buildNucleosomes(stringStart, stringEnd);
+    this.#buildNucleosomes(q);
     this.#buildNucleoplasm(rng, q.particles);
     this.#buildFollowPath();
     this.#buildAnchors(fibers);
@@ -109,7 +133,7 @@ export class NucleusScene extends BaseScene {
     this.tmp = { position: new THREE.Vector3(), ahead: new THREE.Vector3(), gaze: new THREE.Vector3(), target: new THREE.Vector3() };
   }
 
-  #buildEnvelope() {
+  #buildEnvelope(detail) {
     const material = this.animate(
       organicMaterial({
         vertexShader: envelopeVertex,
@@ -126,50 +150,71 @@ export class NucleusScene extends BaseScene {
           uColorPoreCenter: { value: new THREE.Color(ENVELOPE_COLORS.core) },
           uColorRim: { value: new THREE.Color(ENVELOPE_COLORS.rim) },
           uColorInner: { value: new THREE.Color('#5a3a9a') },
+          uSphereRadius: { value: ENVELOPE_RADIUS },
         },
         side: THREE.DoubleSide,
         transparent: true,
         depthWrite: false,
       }),
     );
-    const envelope = new THREE.Mesh(new THREE.IcosahedronGeometry(ENVELOPE_RADIUS, 64), material);
-    envelope.renderOrder = 10;
-    this.scene.add(envelope);
+    // In patches, so the parts out of view are culled (the vertex shader
+    // displaces the surface by up to uAmplitude).
+    const sphere = new THREE.IcosahedronGeometry(ENVELOPE_RADIUS, detail);
+    for (const patch of splitByDirection(sphere, { cells: 2, margin: 1 })) {
+      const envelope = new THREE.Mesh(patch, material);
+      envelope.renderOrder = 10;
+      this.scene.add(envelope);
+    }
+    sphere.dispose();
   }
 
   /**
-   * All fibres merged by look (euchromatin, heterochromatin) — a few draw
-   * calls in total. Fibres that pass near the nucleosome string, where the
-   * camera ends up, are built smooth (more sides, finer rings) so no facets
-   * show up close; the rest stay light.
+   * Chromatin fibres, cut into chunks and merged per region and look
+   * (euchromatin, heterochromatin), so only the regions in view are drawn.
+   * Fibres that pass near the nucleosome string, where the camera ends up,
+   * are built smooth (more sides, finer rings) so no facets show up close;
+   * their stretches far from the camera's path keep every second ring.
    */
-  #buildChromatin(fibers, stringStart, stringEnd) {
-    const groups = new Map();
+  #buildChromatin(fibers, stringStart, stringEnd, q) {
     const closeTo = (p) => {
       const ab = stringEnd.clone().sub(stringStart);
       const t = Math.min(1, Math.max(0, p.clone().sub(stringStart).dot(ab) / ab.lengthSq()));
       return stringStart.clone().addScaledVector(ab, t).distanceTo(p) < CHROMATIN_DETAIL_RANGE;
     };
+    const plain = new Map([[false, []], [true, []]]);
+    const fine = new Map([[false, [[], []]], [true, [[], []]]]);
     for (const { curve, peripheral } of fibers) {
       const close = curve.getSpacedPoints(80).some(closeTo);
+      const { radial, spacing } = close ? q.chromatinNear : q.chromatinFar;
       const geometry = createTaperedTube(curve, {
-        tubularSegments: Math.ceil(curve.getLength() / (close ? 0.1 : 0.22)),
+        tubularSegments: Math.ceil(curve.getLength() / spacing),
         radius: peripheral ? 0.22 : 0.18,
-        radialSegments: close ? 10 : 5,
+        radialSegments: radial,
         taperLength: 1.5,
         fadeLength: 3,
       });
-      if (!groups.has(peripheral)) groups.set(peripheral, []);
-      groups.get(peripheral).push(geometry);
+      const slice = (step) => sliceRings(geometry, { ringSize: radial + 1, ringsPerChunk: Math.max(2, Math.round(CHUNK_LENGTH / spacing)), step: () => step });
+      if (close) {
+        const [full, coarse] = fine.get(peripheral);
+        full.push(...slice(1));
+        coarse.push(...slice(2));
+      } else {
+        plain.get(peripheral).push(...slice(1));
+      }
+      geometry.dispose();
     }
     const looks = new Map([
       [false, { color: '#b867d6', rimColor: '#f0c8ff' }],
       [true, { color: '#7e3aa0', rimColor: '#d8a8f0' }],
     ]);
-    for (const [peripheral, list] of groups) {
-      const geometry = mergeGeometries(list);
-      list.forEach((g) => g.dispose());
-      this.scene.add(new THREE.Mesh(geometry, this.animate(tissueMaterial({ ...looks.get(peripheral), wobble: 0.03, wobbleScale: 0.8, fade: true }))));
+    for (const peripheral of [false, true]) {
+      const material = this.animate(tissueMaterial({ ...looks.get(peripheral), wobble: 0.03, wobbleScale: 0.8, fade: true }));
+      for (const geometry of mergeByCell(plain.get(peripheral), CHUNK_CELL, mergeGeometries)) this.scene.add(new THREE.Mesh(geometry, material));
+      const levels = fine.get(peripheral);
+      if (!levels[0].length) continue;
+      const lod = buildChunkLods(levels, [0, FINE_LOD], FINE_CELL, material, mergeGeometries);
+      this.addCuller(lod);
+      this.scene.add(...lod.meshes);
     }
   }
 
@@ -201,10 +246,18 @@ export class NucleusScene extends BaseScene {
    * as a real double helix (two backbones and coloured base-pair rungs), the
    * structure the DNA scene opens on.
    */
-  #buildNucleosomes(stringStart, stringEnd) {
-    const string = createNucleosomeString(stringStart, stringEnd, this.route.bead, STRING_BEFORE_CENTER + BEADS_AFTER_CENTER);
-    this.string = string;
-    const { wrapped, beads, tangent, naked } = string;
+  #buildNucleosomes(q) {
+    const { wrapped, beads, tangent, naked } = this.string;
+    // Tubes are drawn in chunks so the parts out of view are culled.
+    // Tubes are drawn in chunks (culled when out of view), each with a
+    // lighter level (every third ring) beyond TUBE_LOD.
+    const addChunks = (geometry, radial, spacing, material) => {
+      const slice = (step) => sliceRings(geometry, { ringSize: radial + 1, ringsPerChunk: Math.max(3, Math.round(1.5 / spacing)), step: () => step });
+      const lod = buildChunkLods([slice(1), slice(3)], [0, TUBE_LOD], TUBE_CELL, material, mergeGeometries);
+      this.addCuller(lod);
+      this.scene.add(...lod.meshes);
+      geometry.dispose();
+    };
 
     const length = wrapped.getLength();
     const dnaMaterial = this.animate(
@@ -225,8 +278,11 @@ export class NucleusScene extends BaseScene {
         transparent: true,
       }),
     );
-    this.scene.add(
-      new THREE.Mesh(createTaperedTube(wrapped, { tubularSegments: Math.ceil(length / 0.012), radius: DNA_RADIUS, radialSegments: 16, taperLength: 0.3, fadeLength: 0.5 }), dnaMaterial),
+    addChunks(
+      createTaperedTube(wrapped, { tubularSegments: Math.ceil(length / q.wrappedSpacing), radius: DNA_RADIUS, radialSegments: 16, taperLength: 0.3, fadeLength: 0.5 }),
+      16,
+      q.wrappedSpacing,
+      dnaMaterial,
     );
 
     // Naked double helix: backbones split out of the wrapped strand (short taper at
@@ -234,42 +290,42 @@ export class NucleusScene extends BaseScene {
     const backboneMaterial = this.animate(tissueMaterial({ color: DNA_COLOR, rimColor: '#ffe0ff', wobble: 0, fade: true }));
     for (const strand of [naked.strandA, naked.strandB]) {
       const strandLength = strand.getLength();
-      this.scene.add(
-        new THREE.Mesh(
-          createTaperedTube(strand, { tubularSegments: Math.ceil(strandLength / 0.004), radius: NAKED_STRAND_RADIUS, radialSegments: 10, taperLength: 0.25, fadeLength: 2.5 }),
-          backboneMaterial,
-        ),
+      addChunks(
+        createTaperedTube(strand, { tubularSegments: Math.ceil(strandLength / q.strandSpacing), radius: NAKED_STRAND_RADIUS, radialSegments: q.strandRadial, taperLength: 0.25, fadeLength: 2.5 }),
+        q.strandRadial,
+        q.strandSpacing,
+        backboneMaterial,
       );
     }
-    this.#buildRungs(naked.rungs);
+    this.#buildRungs(naked.rungs, q.rungSegments);
 
+    const [widthSegments, heightSegments] = q.histoneSegments;
     const histones = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(1, 48, 32),
+      new THREE.SphereGeometry(1, widthSegments, heightSegments),
       this.animate(tissueMaterial({ color: '#8e64c8', rimColor: '#d9c4ff', wobble: 0.01, wobbleScale: 6 })),
       beads.length,
     );
     const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent);
     // Histone core: a short, fat spool along the string.
     const scale = new THREE.Vector3(BEAD_RADIUS, BEAD_RADIUS * 1.15, BEAD_RADIUS);
-    const matrix = new THREE.Matrix4();
-    beads.forEach((b, i) => histones.setMatrixAt(i, matrix.compose(b, quaternion, scale)));
-    histones.instanceMatrix.needsUpdate = true;
-    histones.computeBoundingSphere();
+    this.addCuller(new InstanceCuller(histones, beads.map((b) => new THREE.Matrix4().compose(b, quaternion, scale))));
     this.scene.add(histones);
   }
 
   /** Base-pair rungs of the naked DNA: two coloured half-rods per pair, meeting midway. */
-  #buildRungs(rungs) {
+  #buildRungs(rungs, [capSegments, radialSegments]) {
     // Skip the first and last few, where the backbones taper and fade.
     const visible = rungs.slice(6, -Math.round(rungs.length * 0.3));
     if (!visible.length) return;
     const halfLength = visible[0].a.distanceTo(visible[0].b) / 2;
     const radius = NAKED_STRAND_RADIUS * 0.45;
-    const mesh = new THREE.InstancedMesh(
-      new THREE.CapsuleGeometry(radius, Math.max(0.0005, halfLength - radius * 2), 4, 10),
-      new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0, emissive: '#1a1030' }),
-      visible.length * 2,
-    );
+    const material = new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0, emissive: '#1a1030' });
+    const shaft = Math.max(0.0005, halfLength - radius * 2);
+    const mesh = new THREE.InstancedMesh(new THREE.CapsuleGeometry(radius, shaft, capSegments, radialSegments), material, visible.length * 2);
+    // A few pixels wide beyond RUNG_LOD_DISTANCE: a coarser capsule there.
+    const far = new THREE.InstancedMesh(new THREE.CapsuleGeometry(radius, shaft, 1, 5), material, visible.length * 2);
+    const matrices = [];
+    const colors = [];
     const bases = ['A', 'T', 'C', 'G'];
     const complement = { A: 'T', T: 'A', C: 'G', G: 'C' };
     const yAxis = new THREE.Vector3(0, 1, 0);
@@ -286,14 +342,12 @@ export class NucleusScene extends BaseScene {
         direction.subVectors(rung.middle, end);
         center.copy(end).addScaledVector(direction, 0.5);
         quaternion.setFromUnitVectors(yAxis, direction.normalize());
-        mesh.setMatrixAt(i * 2 + k, matrix.compose(center, quaternion, unit));
-        mesh.setColorAt(i * 2 + k, color.set(BASE_COLORS[letter]));
+        matrices[i * 2 + k] = matrix.compose(center, quaternion, unit).clone();
+        colors[i * 2 + k] = color.set(BASE_COLORS[letter]).clone();
       });
     });
-    mesh.instanceMatrix.needsUpdate = true;
-    mesh.instanceColor.needsUpdate = true;
-    mesh.computeBoundingSphere();
-    this.scene.add(mesh);
+    this.addCuller(new InstanceCuller(mesh, matrices, { lod: far, lodDistance: RUNG_LOD_DISTANCE, maxDistance: RUNG_LIMIT, colors }));
+    this.scene.add(mesh, far);
   }
 
   #buildNucleoplasm(rng, count) {

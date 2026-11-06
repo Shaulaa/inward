@@ -13,8 +13,10 @@ export class Captions {
   /**
    * @param {HTMLElement} parent
    * @param {CaptionItem[]} items
+   * @param {{ reducedMotion?: () => boolean }} [options] reduced motion: fade only, no drift
    */
-  constructor(parent, items) {
+  constructor(parent, items, { reducedMotion = () => false } = {}) {
+    this.reducedMotion = reducedMotion;
     this.root = document.createElement('div');
     this.root.className = 'captions';
 
@@ -57,7 +59,7 @@ export class Captions {
       const style = item.element.style;
       style.opacity = String(opacity);
       // A small drift with the fade; invisible ones leave the accessibility tree and stop taking clicks.
-      style.transform = `translate3d(0, ${((1 - opacity) * 10).toFixed(2)}px, 0)`;
+      style.transform = this.reducedMotion() ? 'none' : `translate3d(0, ${((1 - opacity) * 10).toFixed(2)}px, 0)`;
       style.visibility = opacity > 0.01 ? 'visible' : 'hidden';
     }
     if (strongest && strongest.id !== this.announced) {

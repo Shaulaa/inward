@@ -3,6 +3,7 @@ uniform float uLength;
 uniform float uCircumference;
 uniform vec3 uTarget;
 uniform float uFocus;
+uniform float uDetail; // 1 when the lens is within close-up range of the wall
 uniform vec3 uColorWall;
 uniform vec3 uColorBorder;
 uniform vec3 uColorNucleus;
@@ -74,14 +75,20 @@ void main() {
   // (keeps the dive into the wall detailed without shimmering far away).
   base *= 0.9 + 0.2 * fbm3(vWorldPos * 5.0 + vec3(0.0, 0.0, uTime * 0.05));
   float closeUp = 1.0 - smoothstep(0.25, 2.5, dist);
-  base *= 1.0 + closeUp * 0.4 * fbm3(vWorldPos * 42.0 + uTime * 0.08);
 
   // Close-up microstructure: colour variation plus relief through the normal,
-  // weighted by closeUp so it is invisible at distance. Deliberately not inside
-  // an `if`: dFdx/fwidth are undefined in non-uniform control flow on real GPUs.
-  vec4 detail = membraneDetail(vec2(vUv.x * uLength, vUv.y * uCircumference), uCircumference);
-  base *= 1.0 + closeUp * (0.18 * detail.y - 0.45 * detail.z + 0.22 * detail.w);
-  vec3 Nlit = normalize(mix(N, perturbNormal(vWorldPos, N, detail.x * 0.035, 1.0), closeUp));
+  // weighted by closeUp so it is invisible at distance. The derivatives inside
+  // (fwidth, perturbNormal) need uniform control flow: branching on a uniform
+  // is uniform, a per-pixel `if (closeUp > 0.0)` would not be. Skipping it
+  // while the lens is far from the whole wall (uDetail = 0, closeUp = 0
+  // everywhere) changes nothing on screen and saves most of this shader.
+  vec3 Nlit = N;
+  if (uDetail > 0.5) {
+    base *= 1.0 + closeUp * 0.4 * fbm3(vWorldPos * 42.0 + uTime * 0.08);
+    vec4 detail = membraneDetail(vec2(vUv.x * uLength, vUv.y * uCircumference), uCircumference);
+    base *= 1.0 + closeUp * (0.18 * detail.y - 0.45 * detail.z + 0.22 * detail.w);
+    Nlit = normalize(mix(N, perturbNormal(vWorldPos, N, detail.x * 0.035, 1.0), closeUp));
+  }
 
   // Dim headlamp lighting with a deep, dark rim: the wall stays a maroon
   // backdrop so the brighter red cells pop in front of it. A weak key light
